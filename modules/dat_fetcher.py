@@ -79,21 +79,23 @@ class DATFetcher:
         response.raise_for_status()
 
         html = response.text
-        rows = re.findall(r'<tr[^>]*>.*?</tr>', html, re.S)
+        rows = re.findall(r"<tr[^>]*>.*?</tr>", html, re.S)
 
         exact_url = None
         fallback_url = None
 
         for row in rows:
-            if 'page=download&op=dat' not in row:
+            if "page=download&op=dat" not in row:
                 continue
 
-            name_match = re.search(r'<b>([^<]+)</b>', row)
-            link_match = re.search(r'href\s*=\s*"(index\.php\?page=download&op=dat&s=\d+)"', row)
+            name_match = re.search(r"<b>([^<]+)</b>", row)
+            link_match = re.search(
+                r'href\s*=\s*"(index\.php\?page=download&op=dat&s=\d+)"', row
+            )
             if not name_match or not link_match:
                 continue
 
-            candidate = ' '.join(name_match.group(1).split())
+            candidate = " ".join(name_match.group(1).split())
             if candidate == display_name:
                 exact_url = link_match.group(1)
                 break
@@ -151,7 +153,9 @@ class DATFetcher:
             display_name = system_map[system]
             url = self._get_datomatic_dat_url(display_name)
             if not url:
-                self.logger(f"✗ Unable to locate DAT download for {display_name}", "ERROR")
+                self.logger(
+                    f"✗ Unable to locate DAT download for {display_name}", "ERROR"
+                )
                 results[system] = False
                 continue
 
