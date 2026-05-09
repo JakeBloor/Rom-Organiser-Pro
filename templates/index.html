@@ -1,0 +1,302 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta content="width=device-width, initial-scale=1" name="viewport" />
+
+    <title>ROM Organizer Pro</title>
+
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+    />
+
+    <link href="/static/css/custom.css" rel="stylesheet" />
+  </head>
+  <body>
+    <div class="container py-5">
+      <div class="card p-4 shadow-lg">
+        <h1 class="mb-4">🎮 ROM Organizer Pro</h1>
+
+        <form method="post">
+          <div class="mb-3">
+            <label class="form-label">ROM Import Folder</label>
+            <input
+              class="form-control"
+              name="input_path"
+              placeholder="/home/deck/Downloads/NewROMs"
+            />
+          </div>
+
+          <div class="mb-3">
+            <label class="form-label">EmuDeck ROM Folder</label>
+            <input
+              class="form-control"
+              name="emudeck_path"
+              value="/home/deck/Emulation/roms"
+            />
+          </div>
+
+          <button class="btn btn-primary btn-lg w-100">Run Organizer</button>
+        </form>
+        <div class="d-flex justify-content-end mb-3">
+          <a href="/logs" class="btn btn-outline-secondary">View Full Logs</a>
+        </div>
+        <hr />
+
+        <h4 class="mb-3">📊 Progress</h4>
+
+        <div class="progress mb-4" role="progressbar">
+          <div
+            class="progress-bar progress-bar-striped progress-bar-animated"
+            id="progressBar"
+            style="width: {{ progress }}%"
+          >
+            {{ progress }}%
+          </div>
+        </div>
+
+        <div class="row text-center mb-4">
+          <div class="col-md-3">
+            <div class="stat-card">
+              <h5>ROMs Processed</h5>
+              <h2>{{ roms_processed }}</h2>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="stat-card">
+              <h5>Duplicates</h5>
+              <h2>{{ duplicates }}</h2>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="stat-card">
+              <h5>DAT Matches</h5>
+              <h2>{{ dat_matches }}</h2>
+            </div>
+          </div>
+
+          <div class="col-md-3">
+            <div class="stat-card">
+              <h5>Artwork Downloads</h5>
+              <h2>{{ artwork_downloads }}</h2>
+            </div>
+          </div>
+        </div>
+
+        <h4>📜 Logs</h4>
+
+        <pre>{{ log }}</pre>
+
+        <div class="card mt-4 p-4 bg-light">
+          <h4 class="mb-3">🗂️ Best DAT Sources</h4>
+
+          <p>
+            Here are the best places to get DAT files for your ROM Organizer Pro
+            setup. These are the standard sources used by FinalBurn Neo, MAME,
+            EmulationStation DE, LaunchBox, ClrMamePro, and RomVault.
+          </p>
+
+          <h5>No-Intro DATs (cartridge systems)</h5>
+          <p>
+            <strong>Best for:</strong> NES, SNES, N64, GBA, DS, 3DS, Genesis
+          </p>
+          <p>
+            <strong>Official:</strong>
+            <a
+              href="https://datomatic.no-intro.org"
+              target="_blank"
+              rel="noopener"
+              >No-Intro DAT-o-MATIC</a
+            >
+          </p>
+          <p>
+            Use these for clean retail dumps, naming standardization, and hash
+            verification.
+          </p>
+
+          <h5>Redump DATs (disc systems)</h5>
+          <p>
+            <strong>Best for:</strong> PS1, PS2, Saturn, Dreamcast, GameCube,
+            Wii, Sega CD
+          </p>
+          <p>
+            <strong>Official:</strong>
+            <a href="https://redump.org" target="_blank" rel="noopener"
+              >Redump.org</a
+            >
+          </p>
+          <p>
+            Use for CHD validation, BIN/CUE validation, and ISO verification.
+          </p>
+
+          <h5>FBNeo DAT</h5>
+          <p><strong>Best for:</strong> FinalBurn Neo arcade ROMs</p>
+          <p>
+            <strong>Official GitHub:</strong>
+            <a
+              href="https://github.com/finalburnneo/FBNeo"
+              target="_blank"
+              rel="noopener"
+              >FinalBurn Neo GitHub</a
+            >
+          </p>
+          <p>
+            <strong>DAT folder:</strong>
+            <a
+              href="https://github.com/finalburnneo/FBNeo/tree/master/Extras/dats"
+              target="_blank"
+              rel="noopener"
+              >FBNeo DATs Folder</a
+            >
+          </p>
+          <p>
+            Important: match DAT version to emulator version; arcade ROM sets
+            are version-sensitive.
+          </p>
+
+          <h5>MAME DATs</h5>
+          <p>
+            <strong>Best for:</strong> MAME, arcade validation, BIOS
+            verification
+          </p>
+          <p>
+            <strong>Official:</strong>
+            <a
+              href="https://www.mame.net/download"
+              target="_blank"
+              rel="noopener"
+              >MAME Downloads</a
+            >
+          </p>
+          <p>Or generate directly with:</p>
+          <pre class="bg-white p-2">mame -listxml &gt; mame.xml</pre>
+
+          <h5>RetroArch DAT collection</h5>
+          <p>
+            <strong>Useful mega-pack:</strong>
+            <a
+              href="https://github.com/libretro/libretro-dats"
+              target="_blank"
+              rel="noopener"
+              >Libretro DATs</a
+            >
+          </p>
+          <p>
+            Contains playlist DATs, No-Intro mappings, and arcade mappings.
+            Great for ES-DE scraping and RetroArch playlists.
+          </p>
+
+          <h5>Recommended DAT structure</h5>
+          <pre class="bg-white p-2">
+dats/
+├── no-intro/
+├── redump/
+├── fbneo/
+├── mame/
+└── retroarch/</pre
+          >
+
+          <h5>Recommended usage by system</h5>
+          <table class="table table-sm table-bordered">
+            <thead>
+              <tr>
+                <th>System</th>
+                <th>DAT Source</th>
+              </tr>
+            </thead>
+            <tbody>
+              <tr>
+                <td>NES</td>
+                <td>No-Intro</td>
+              </tr>
+              <tr>
+                <td>SNES</td>
+                <td>No-Intro</td>
+              </tr>
+              <tr>
+                <td>N64</td>
+                <td>No-Intro</td>
+              </tr>
+              <tr>
+                <td>GBA</td>
+                <td>No-Intro</td>
+              </tr>
+              <tr>
+                <td>DS</td>
+                <td>No-Intro</td>
+              </tr>
+              <tr>
+                <td>3DS</td>
+                <td>No-Intro</td>
+              </tr>
+              <tr>
+                <td>PS1</td>
+                <td>Redump</td>
+              </tr>
+              <tr>
+                <td>PS2</td>
+                <td>Redump</td>
+              </tr>
+              <tr>
+                <td>Dreamcast</td>
+                <td>Redump</td>
+              </tr>
+              <tr>
+                <td>Saturn</td>
+                <td>Redump</td>
+              </tr>
+              <tr>
+                <td>GameCube</td>
+                <td>Redump</td>
+              </tr>
+              <tr>
+                <td>Wii</td>
+                <td>Redump</td>
+              </tr>
+              <tr>
+                <td>Arcade</td>
+                <td>FBNeo / MAME</td>
+              </tr>
+            </tbody>
+          </table>
+
+          <div class="alert alert-warning" role="alert">
+            <strong>Important:</strong> Arcade DATs are version-sensitive.
+            Always keep FBNeo and MAME DAT versions aligned with the emulator
+            release.
+          </div>
+
+          <h5>Best practice</h5>
+          <p>
+            Use No-Intro for cartridge systems, Redump for discs, FBNeo for
+            arcade ROMs, and MAME for BIOS validation. This gives better scraper
+            matching, accurate naming, cleaner ES-DE libraries, and fewer
+            duplicates.
+          </p>
+
+          <h5>Future upgrade</h5>
+          <p>
+            Consider adding DAT auto-downloader support so the app can fetch,
+            cache, and update latest DATs automatically based on emulator
+            versions.
+          </p>
+        </div>
+      </div>
+    </div>
+
+    <script>
+      setInterval(() => {
+        fetch("/status")
+          .then((r) => r.json())
+          .then((data) => {
+            const bar = document.getElementById("progressBar");
+            bar.style.width = data.progress + "%";
+            bar.innerText = data.progress + "%";
+          });
+      }, 1000);
+    </script>
+  </body>
+</html>
