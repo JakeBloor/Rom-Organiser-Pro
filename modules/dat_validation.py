@@ -48,7 +48,26 @@ def fetch_latest_dats(logger, systems=None):
         dict: Fetch results
     """
     fetcher = DATFetcher(logger)
-    return fetcher.fetch_no_intro_dats(systems)
+
+    logger(
+        "⚠️  Note: DAT-o-MATIC requires manual download due to JavaScript form handling.",
+        "WARNING",
+    )
+    logger(
+        "Visit https://datomatic.no-intro.org and download DAT files manually.", "INFO"
+    )
+    logger("Place DAT files in the 'dats/' directory for ROM validation.", "INFO")
+
+    try:
+        results = fetcher.fetch_no_intro_dats(systems)
+        return results
+    except Exception as e:
+        logger(f"DAT fetch error: {e}", "ERROR")
+        logger(
+            "As a workaround, manually download and place DAT files in dats/ folder",
+            "WARNING",
+        )
+        return {}
 
 
 def validate_hashes(hashes):

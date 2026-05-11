@@ -3,6 +3,9 @@ import requests
 import xml.etree.ElementTree as ET
 from datetime import datetime
 from urllib.parse import quote
+import zipfile
+import io
+import gzip
 
 from config import DAT_DIR
 
@@ -21,7 +24,8 @@ class DATFetcher:
 
     def fetch_dat(self, url, filename=None):
         """
-        Fetch a single DAT file from URL
+        Fetch a single DAT file from URL with proper redirect handling and compression support.
+        Handles DAT-o-MATIC's form-based downloads.
 
         Args:
             url (str): URL to fetch DAT from
@@ -40,18 +44,140 @@ class DATFetcher:
             file_path = DAT_DIR / filename
 
             self.logger(f"Fetching DAT: {filename}", "INFO")
-            response = requests.get(url, timeout=30)
+
+            # First request to get potential form/selection page
+            response = requests.get(url, timeout=30, allow_redirects=True)
             response.raise_for_status()
 
+            content = response.content
+
+            # If we got an HTML selection page from DAT-o-MATIC, submit the form
+            if (
+                content.startswith(b"<!DOCTYPE") or content.startswith(b"<html")
+            ) and "datomatic" in url.lower():
+                self.logger(
+                    f"Got selection page, submitting download request...", "INFO"
+                )
+
+                # Extract the system ID from the URL
+                system_id_match = re.search(r"&s=(\d+)", url)
+                if system_id_match:
+                    system_id = system_id_match.group(1)
+
+                    # Try to submit a download request with form data
+                    form_url = "https://datomatic.no-intro.org/index.php"
+                    form_data = {
+                        "page": "download",
+                        "s": system_id,
+                        "op": "dat",
+                        "download": "1",
+                    }
+
+                    response = requests.post(
+                        form_url, data=form_data, timeout=30, allow_redirects=True
+                    )
+                    response.raise_for_status()
+                    content = response.content
+
+                    # If still HTML, extract checkbox select list and try again
+                    if content.startswith(b"<!DOCTYPE") or content.startswith(b"<html"):
+                        html_str = content.decode("utf-8", errors="ignore")
+                        # Look for checkboxes in the form
+                        checkbox_matches = re.findall(
+                            r'<input[^>]*name="([^"]*)"[^>]*value="(\d+)"', html_str
+                        )
+                        if checkbox_matches:
+                            # Select the first checkbox (usually the standard DAT)
+                            select_data = {
+                                "page": "download",
+                                "s": system_id,
+                                "op": "dat",
+                                checkbox_matches[0][0]: checkbox_matches[0][1],
+                            }
+                            response = requests.post(
+                                form_url,
+                                data=select_data,
+                                timeout=30,
+                                allow_redirects=True,
+                            )
+                            response.raise_for_status()
+                            content = response.content
+
+            # Check if we got HTML instead of a DAT file
+            if content.startswith(b"<!DOCTYPE") or content.startswith(b"<html"):
+                # Try to extract download link from HTML
+                html_str = content.decode("utf-8", errors="ignore")
+
+                # Look for common download link patterns
+                download_patterns = [
+                    r'href=["\']([^"\']*\.zip[^"\']*)["\']',
+                    r'href=["\']([^"\']*\.gz[^"\']*)["\']',
+                    r'href=["\']([^"\']*download[^"\']*)["\']',
+                ]
+
+                found_url = None
+                for pattern in download_patterns:
+                    matches = re.findall(pattern, html_str)
+                    if matches:
+                        found_url = matches[0]
+                        break
+
+                if found_url:
+                    # Try the extracted URL
+                    if not found_url.startswith("http"):
+                        # Make it absolute
+                        base_domain = "https://datomatic.no-intro.org"
+                        if found_url.startswith("/"):
+                            found_url = base_domain + found_url
+                        else:
+                            found_url = base_domain + "/" + found_url
+
+                    self.logger(f"Following download link: {found_url}", "INFO")
+                    response = requests.get(found_url, timeout=30, allow_redirects=True)
+                    response.raise_for_status()
+                    content = response.content
+                else:
+                    self.logger(
+                        f"✗ Got HTML page instead of DAT file: {filename}", "ERROR"
+                    )
+                    return False
+
+            # Handle ZIP files (DAT-o-MATIC may return ZIP archives)
+            if content.startswith(b"PK"):  # ZIP magic number
+                try:
+                    self.logger(f"Extracting DAT from ZIP...", "INFO")
+                    with zipfile.ZipFile(io.BytesIO(content)) as zf:
+                        # Find the first .dat file in the ZIP
+                        dat_files = [
+                            f for f in zf.namelist() if f.lower().endswith(".dat")
+                        ]
+                        if dat_files:
+                            content = zf.read(dat_files[0])
+                        else:
+                            self.logger(f"No .dat file found in ZIP", "ERROR")
+                            return False
+                except Exception as e:
+                    self.logger(f"Failed to extract ZIP: {e}", "ERROR")
+                    return False
+
+            # Handle GZIP files
+            elif content.startswith(b"\x1f\x8b"):  # GZIP magic number
+                try:
+                    self.logger(f"Decompressing GZIP...", "INFO")
+                    content = gzip.decompress(content)
+                except Exception as e:
+                    self.logger(f"Failed to decompress GZIP: {e}", "ERROR")
+                    return False
+
             with open(file_path, "wb") as f:
-                f.write(response.content)
+                f.write(content)
 
             # Validate the DAT file
             if self._validate_dat_file(file_path):
                 self.logger(f"✓ Successfully downloaded: {filename}", "SUCCESS")
                 return True
             else:
-                self.logger(f"✗ Invalid DAT file: {filename}", "ERROR")
+                self.logger(f"✗ Invalid DAT file (not valid XML): {filename}", "ERROR")
                 file_path.unlink()  # Delete invalid file
                 return False
 
@@ -72,42 +198,37 @@ class DATFetcher:
             return False
 
     def _get_datomatic_dat_url(self, display_name):
-        """Return the DAT download URL for a No-Intro system from DAT-o-MATIC."""
-        query = quote(display_name, safe="")
-        page_url = f"{self.DAT_SOURCES['datomatic']}{query}"
-        response = requests.get(page_url, timeout=30)
-        response.raise_for_status()
+        """Return the DAT download URL for a No-Intro system from DAT-o-MATIC.
 
-        html = response.text
-        rows = re.findall(r"<tr[^>]*>.*?</tr>", html, re.S)
+        DAT-o-MATIC doesn't serve direct download links, so we need to:
+        1. Search for the system
+        2. Get the system ID (s=...)
+        3. Return a direct POST-able endpoint for the DAT file
+        """
+        try:
+            query = quote(display_name, safe="")
+            page_url = f"{self.DAT_SOURCES['datomatic']}{query}"
+            response = requests.get(page_url, timeout=30)
+            response.raise_for_status()
 
-        exact_url = None
-        fallback_url = None
+            html = response.text
 
-        for row in rows:
-            if "page=download&op=dat" not in row:
-                continue
+            # Extract the system ID (s=XX) from the page
+            system_id_match = re.search(r"\?page=download&s=(\d+)&op=dat", html)
+            if not system_id_match:
+                # Try alternate pattern
+                system_id_match = re.search(r"&s=(\d+)[^0-9]", html)
 
-            name_match = re.search(r"<b>([^<]+)</b>", row)
-            link_match = re.search(
-                r'href\s*=\s*"(index\.php\?page=download&op=dat&s=\d+)"', row
-            )
-            if not name_match or not link_match:
-                continue
+            if system_id_match:
+                system_id = system_id_match.group(1)
+                # Return URL with op=dat which should initiate download or show selection
+                return f"https://datomatic.no-intro.org/index.php?page=download&s={system_id}&op=dat"
 
-            candidate = " ".join(name_match.group(1).split())
-            if candidate == display_name:
-                exact_url = link_match.group(1)
-                break
-
-            if candidate.startswith(display_name):
-                fallback_url = fallback_url or link_match.group(1)
-
-        dat_link = exact_url or fallback_url
-        if not dat_link:
             return None
 
-        return f"https://datomatic.no-intro.org/{dat_link}"
+        except Exception as e:
+            self.logger(f"Error extracting DAT URL for {display_name}: {e}", "ERROR")
+            return None
 
     def fetch_no_intro_dats(self, systems=None):
         """

@@ -18,6 +18,78 @@
       <div class="card p-4 shadow-lg">
         <h1 class="mb-4">🎮 ROM Organizer Pro</h1>
 
+        <!-- STATUS PANEL -->
+        <div class="card mb-4 p-3 bg-light border-info">
+          <h5 class="card-title mb-3">📡 System Status</h5>
+
+          <!-- Detection Stats -->
+          <div class="mb-3">
+            <h6>📊 Games Detected</h6>
+            <div class="row">
+              <div class="col-md-3">
+                <div class="stat-mini">
+                  <small class="text-muted">Total Games</small>
+                  <div class="h5" id="totalGames">--</div>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <div class="stat-mini">
+                  <small class="text-muted">Systems</small>
+                  <div class="h5" id="systemsCount">--</div>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <div class="stat-mini">
+                  <small class="text-muted">Undetected</small>
+                  <div class="h5 text-warning" id="undetectedCount">--</div>
+                </div>
+              </div>
+              <div class="col-md-3">
+                <div class="stat-mini">
+                  <small class="text-muted">DAT Files (disabled)</small>
+                  <div class="h5" id="datFilesCount">--</div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Games by System (Top 10) -->
+          <div class="mb-3">
+            <h6>🎮 Top Systems</h6>
+            <div id="gamesBySystem" style="max-height: 250px; overflow-y: auto">
+              <small class="text-muted">Loading...</small>
+            </div>
+          </div>
+
+          <!-- API Status -->
+          <div class="mb-3">
+            <h6>API Connections</h6>
+            <div id="apiStatus" class="row">
+              <div class="col-md-3">
+                <small class="text-muted">Loading...</small>
+              </div>
+            </div>
+          </div>
+
+          <div class="alert alert-secondary mb-3">
+            <h6 class="alert-heading">⚠️ DAT Integration Disabled</h6>
+            <p class="mb-2">
+              DAT support is currently turned off. The app will continue to scan
+              your ROM collection without DAT metadata or validation.
+            </p>
+            <p class="mb-0" style="font-size: 0.85rem">
+              If you want to re-enable DAT integration later, restore DAT
+              loading and fetch logic in <code>app.py</code>.
+            </p>
+          </div>
+
+          <div class="mb-2">
+            <small class="text-muted"
+              >Last scanned: <span id="lastScanTime">--:--:--</span></small
+            >
+          </div>
+        </div>
+
         <form method="post">
           <div class="mb-3">
             <label class="form-label">ROM Import Folder</label>
@@ -37,7 +109,22 @@
             />
           </div>
 
-          <button class="btn btn-primary btn-lg w-100">Run Organizer</button>
+          <div class="row gap-2">
+            <div class="col">
+              <button type="submit" class="btn btn-primary btn-lg w-100">
+                Run Organizer
+              </button>
+            </div>
+            <div class="col">
+              <button
+                type="button"
+                class="btn btn-info btn-lg w-100"
+                onclick="scanGames()"
+              >
+                🔍 Scan Games
+              </button>
+            </div>
+          </div>
         </form>
         <hr />
 
@@ -285,6 +372,112 @@ dats/
     </div>
 
     <script>
+      // Scan games function
+      function scanGames() {
+        const btn = event.target;
+        btn.disabled = true;
+        btn.innerHTML = "🔄 Scanning...";
+
+        fetch("/api/scan-games", { method: "POST" })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.success) {
+              alert(
+                `✓ Scan complete!\n\nGames found: ${data.total_games}\nSystems: ${data.systems_detected}\nUndetected: ${data.undetected}`,
+              );
+            } else {
+              alert(`✗ Scan failed: ${data.error}`);
+            }
+            updateStatusPanel();
+          })
+          .catch((err) => {
+            console.error("Scan error:", err);
+            alert("Scan failed: " + err.message);
+          })
+          .finally(() => {
+            btn.disabled = false;
+            btn.innerHTML = "🔍 Scan Games";
+          });
+      }
+
+      // Update status panel
+      function updateStatusPanel() {
+        fetch("/api/status")
+          .then((r) => r.json())
+          .then((data) => {
+            // Update timestamp
+            const now = new Date(data.timestamp);
+            document.getElementById("lastScanTime").textContent = data.detection
+              .last_scan
+              ? new Date(data.detection.last_scan).toLocaleTimeString()
+              : "--:--:--";
+
+            // Update detection stats
+            document.getElementById("totalGames").textContent =
+              data.detection.total_games;
+            document.getElementById("systemsCount").textContent =
+              data.detection.detected_systems;
+            document.getElementById("undetectedCount").textContent =
+              data.detection.undetected_count;
+            document.getElementById("datFilesCount").textContent =
+              data.dats.total_files;
+
+            // Update games by system (top 10)
+            const gamesBySystem = document.getElementById("gamesBySystem");
+            if (Object.keys(data.detection.games_by_system).length === 0) {
+              gamesBySystem.innerHTML =
+                '<small class="text-muted">No games detected yet. Click "Scan Games" to detect your collection.</small>';
+            } else {
+              let html = '<div class="list-group">';
+              const systems = Object.entries(
+                data.detection.games_by_system,
+              ).slice(0, 10);
+              systems.forEach(([system, count]) => {
+                const percentage = Math.round(
+                  (count / data.detection.total_games) * 100,
+                );
+                html += `
+                  <div class="list-group-item d-flex justify-content-between align-items-center">
+                    <span>${system}</span>
+                    <div class="d-flex align-items-center gap-2">
+                      <div class="progress" style="width: 100px; height: 20px;">
+                        <div class="progress-bar" style="width: ${percentage}%" role="progressbar">${count}</div>
+                      </div>
+                      <small class="text-muted">${percentage}%</small>
+                    </div>
+                  </div>
+                `;
+              });
+              html += "</div>";
+              gamesBySystem.innerHTML = html;
+            }
+
+            // Update API status
+            const apiStatus = document.getElementById("apiStatus");
+            let apiHtml = "";
+            for (const [service, config] of Object.entries(data.apis)) {
+              const badge = config.configured
+                ? '<span class="badge bg-success">✓ Ready</span>'
+                : '<span class="badge bg-warning">○ Not Configured</span>';
+              const displayName = service
+                .replace(/_/g, " ")
+                .replace(/\b\w/g, (l) => l.toUpperCase());
+              apiHtml += `<div class="col-md-3 mb-2"><small>${displayName}: ${badge}</small></div>`;
+            }
+            apiStatus.innerHTML = apiHtml;
+          })
+          .catch((err) => {
+            console.error("Status update error:", err);
+            document.getElementById("apiStatus").innerHTML =
+              '<div class="col-md-12"><small class="text-danger">Error loading status</small></div>';
+          });
+      }
+
+      // Initial load and refresh every 5 seconds
+      updateStatusPanel();
+      setInterval(updateStatusPanel, 5000);
+
+      // Update progress bar
       setInterval(() => {
         fetch("/status")
           .then((r) => r.json())
