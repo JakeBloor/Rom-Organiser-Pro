@@ -1,5 +1,4 @@
 from flask import Flask, render_template, request, jsonify
-import os
 from datetime import datetime
 from collections import defaultdict
 
@@ -7,7 +6,16 @@ from modules.organizer import process_roms
 from modules.scraper import run_skyscraper
 from modules.logging_utils import AppLogger
 from modules.detection import detect_system
-from config import DAT_DIR, EMUDECK_ROOT, SYSTEM_MAP
+from config import (
+    DAT_DIR,
+    EMUDECK_ROOT,
+    SYSTEM_MAP,
+    ENABLE_STEAMGRIDDB,
+    STEAMGRIDDB_API,
+    ENABLE_SCREENSCRAPER,
+    SCREENSCRAPER_USER,
+    SCREENSCRAPER_PASSWORD,
+)
 
 app = Flask(__name__)
 
@@ -49,15 +57,12 @@ def api_status():
             },
             "apis": {
                 "steamgriddb": {
-                    "enabled": bool(os.getenv("STEAMGRIDDB_API")),
-                    "configured": bool(os.getenv("STEAMGRIDDB_API")),
+                    "enabled": bool(ENABLE_STEAMGRIDDB),
+                    "configured": bool(STEAMGRIDDB_API),
                 },
                 "screenscraper": {
-                    "enabled": bool(os.getenv("SCREENSCRAPER_USER")),
-                    "configured": bool(
-                        os.getenv("SCREENSCRAPER_USER")
-                        and os.getenv("SCREENSCRAPER_PASSWORD")
-                    ),
+                    "enabled": bool(ENABLE_SCREENSCRAPER),
+                    "configured": bool(SCREENSCRAPER_USER and SCREENSCRAPER_PASSWORD),
                 },
             },
             "dats": {"directory": str(DAT_DIR), "total_files": 0, "files": []},

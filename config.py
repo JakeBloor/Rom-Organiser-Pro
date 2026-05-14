@@ -12,28 +12,11 @@ MEDIA_DIR = Path("./media")
 # ========= API CONFIG =========
 
 # SteamGridDB
-STEAMGRIDDB_API = os.getenv("STEAMGRIDDB_API", "")
+STEAMGRIDDB_API = "58e1ea89a891ec6dde2f818155da4146"
 
 # ScreenScraper
-SCREENSCRAPER_USER = os.getenv("SCREENSCRAPER_USER", "")
-SCREENSCRAPER_PASSWORD = os.getenv("SCREENSCRAPER_PASSWORD", "")
-
-# IGDB / Twitch API
-TWITCH_CLIENT_ID = os.getenv("TWITCH_CLIENT_ID", "")
-TWITCH_CLIENT_SECRET = os.getenv("TWITCH_CLIENT_SECRET", "")
-
-# RetroAchievements
-RETROACHIEVEMENTS_USER = os.getenv("RETROACHIEVEMENTS_USER", "")
-RETROACHIEVEMENTS_API_KEY = os.getenv("RETROACHIEVEMENTS_API_KEY", "")
-
-# LaunchBox Games Database
-LAUNCHBOX_API_KEY = os.getenv("LAUNCHBOX_API_KEY", "")
-
-# GiantBomb API
-GIANTBOMB_API_KEY = os.getenv("GIANTBOMB_API_KEY", "")
-
-# RAWG API
-RAWG_API_KEY = os.getenv("RAWG_API_KEY", "")
+SCREENSCRAPER_USER = ""
+SCREENSCRAPER_PASSWORD = ""
 
 # ========= SCRAPER SETTINGS =========
 
