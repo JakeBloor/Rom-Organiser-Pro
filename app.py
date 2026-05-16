@@ -7,6 +7,7 @@ from modules.organizer import process_roms
 from modules.scraper import run_skyscraper
 from modules.logging_utils import AppLogger
 from modules.detection import detect_system
+from modules.dat_validation import fetch_latest_dats, load_dat_files
 from config import (
     DAT_DIR,
     EMUDECK_ROOT,
@@ -106,7 +107,11 @@ def scan_games():
         detection_stats["undetected_files"] = []
 
         body = request.get_json(silent=True) or {}
-        scan_root = Path(body.get("emudeck_path", "")) if body.get("emudeck_path") else EMUDECK_ROOT
+        scan_root = (
+            Path(body.get("emudeck_path", ""))
+            if body.get("emudeck_path")
+            else EMUDECK_ROOT
+        )
 
         if not scan_root.exists():
             return (
@@ -208,9 +213,17 @@ def view_logs():
 
 
 def initialize_dat_files():
-    app_logger.info("DAT integration is disabled for now.")
+    # Attempt to fetch DATs from libretro first, fall back to local DATs
+    try:
+        app_logger.info("Initializing DAT files: fetching latest DATs if available...")
+        results = fetch_latest_dats(app_logger.log)
+        # If fetch_latest_dats loaded DATs it will have called load_dat_files; ensure local load as well
+        load_dat_files(app_logger.log)
+        app_logger.success("DAT initialization complete (libretro/local fallback)")
+    except Exception as e:
+        app_logger.error(f"DAT initialization failed: {e}")
 
-    # Scan for games on startup without DAT loading
+    # Scan for games on startup (now with DATs loaded if available)
     try:
         app_logger.info("Scanning for games...")
         if EMUDECK_ROOT.exists():
@@ -218,8 +231,7 @@ def initialize_dat_files():
                 if rom_file.is_file():
                     system = detect_system(str(rom_file))
                     if system:
-                        if system not in detection_stats["games_by_system"]:
-                            detection_stats["games_by_system"][system] = 0
+                        detection_stats["games_by_system"].setdefault(system, 0)
                         detection_stats["games_by_system"][system] += 1
                     else:
                         detection_stats["undetected_files"].append(rom_file.name)

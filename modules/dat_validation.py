@@ -49,17 +49,38 @@ def fetch_latest_dats(logger, systems=None):
     """
     fetcher = DATFetcher(logger)
 
+    # First try libretro database (fast, single archive).
+    try:
+        logger("Attempting to fetch DATs from libretro database...", "INFO")
+        lr_results = fetcher.fetch_libretro_dats()
+        if lr_results.get("libretro"):
+            logger("Successfully fetched DATs from libretro repository.", "SUCCESS")
+            # Load newly fetched DATs into memory
+            load_dat_files(logger)
+            return {"libretro": True}
+        else:
+            logger(
+                "Libretro fetch returned no DATs, falling back to DAT-o-MATIC.",
+                "WARNING",
+            )
+    except Exception as e:
+        logger(f"Libretro fetch failed: {e}", "ERROR")
+
+    # Fallback to DAT-o-MATIC guidance
     logger(
-        "⚠️  Note: DAT-o-MATIC requires manual download due to JavaScript form handling.",
+        "⚠️  DAT-o-MATIC may require manual download; attempting scripted fetch where possible.",
         "WARNING",
     )
     logger(
-        "Visit https://datomatic.no-intro.org and download DAT files manually.", "INFO"
+        "If scripted fetch fails, download DATs manually from https://datomatic.no-intro.org and place them in dats/.",
+        "INFO",
     )
-    logger("Place DAT files in the 'dats/' directory for ROM validation.", "INFO")
 
     try:
         results = fetcher.fetch_no_intro_dats(systems)
+        # If any success, load dats
+        if any(results.values()):
+            load_dat_files(logger)
         return results
     except Exception as e:
         logger(f"DAT fetch error: {e}", "ERROR")
