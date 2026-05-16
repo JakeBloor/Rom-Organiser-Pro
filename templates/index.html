@@ -32,22 +32,16 @@
                   <div class="h5" id="totalGames">--</div>
                 </div>
               </div>
-              <div class="col-md-3">
+              <div class="col-md-4">
                 <div class="stat-mini">
                   <small class="text-muted">Systems</small>
                   <div class="h5" id="systemsCount">--</div>
                 </div>
               </div>
-              <div class="col-md-3">
+              <div class="col-md-4">
                 <div class="stat-mini">
                   <small class="text-muted">Undetected</small>
                   <div class="h5 text-warning" id="undetectedCount">--</div>
-                </div>
-              </div>
-              <div class="col-md-3">
-                <div class="stat-mini">
-                  <small class="text-muted">DAT Files (disabled)</small>
-                  <div class="h5" id="datFilesCount">--</div>
                 </div>
               </div>
             </div>
@@ -73,18 +67,6 @@
                 <small class="text-muted">Loading...</small>
               </div>
             </div>
-          </div>
-
-          <div class="alert alert-secondary mb-3">
-            <h6 class="alert-heading">⚠️ DAT Integration Disabled</h6>
-            <p class="mb-2">
-              DAT support is currently turned off. The app will continue to scan
-              your ROM collection without DAT metadata or validation.
-            </p>
-            <p class="mb-0" style="font-size: 0.85rem">
-              If you want to re-enable DAT integration later, restore DAT
-              loading and fetch logic in <code>app.py</code>.
-            </p>
           </div>
 
           <div class="mb-2">
@@ -431,8 +413,6 @@ dats/
               data.detection.detected_systems;
             document.getElementById("undetectedCount").textContent =
               data.detection.undetected_count;
-            document.getElementById("datFilesCount").textContent =
-              data.dats.total_files;
 
             // Update games by system (top 10)
             const gamesBySystem = document.getElementById("gamesBySystem");
