@@ -70,6 +70,26 @@ Feature: ROM System Detection
     When the system detection runs
     Then the detected system should be "switch"
 
+  Scenario: PS4 ROM with folder hint and ambiguous ISO extension
+    Given a ROM with path "/roms/ps4/horizon_zero_dawn.iso"
+    When the system detection runs
+    Then the detected system should be "ps4"
+
+  Scenario: PS5 ROM with folder hint and ambiguous ISO extension
+    Given a ROM with path "/roms/ps5/demon_souls.iso"
+    When the system detection runs
+    Then the detected system should be "ps5"
+
+  Scenario: PS4 ROM with folder hint and ambiguous PKG extension
+    Given a ROM with path "/roms/ps4/ratchet_and_clank.pkg"
+    When the system detection runs
+    Then the detected system should be "ps4"
+
+  Scenario: PS5 ROM with folder hint and ambiguous PKG extension
+    Given a ROM with path "/roms/ps5/returnal.pkg"
+    When the system detection runs
+    Then the detected system should be "ps5"
+
   Scenario: FBNeo arcade ROM in arcade folder
     Given a ROM with path "/arcade/fbneo/pacman.zip"
     When the system detection runs

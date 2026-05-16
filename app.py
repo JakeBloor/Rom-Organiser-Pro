@@ -1,4 +1,5 @@
 from flask import Flask, render_template, request, jsonify
+from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
 
@@ -104,12 +105,15 @@ def scan_games():
         detection_stats["games_by_system"] = defaultdict(int)
         detection_stats["undetected_files"] = []
 
-        if not EMUDECK_ROOT.exists():
+        body = request.get_json(silent=True) or {}
+        scan_root = Path(body.get("emudeck_path", "")) if body.get("emudeck_path") else EMUDECK_ROOT
+
+        if not scan_root.exists():
             return (
                 jsonify(
                     {
                         "success": False,
-                        "error": f"EmuDeck directory not found: {EMUDECK_ROOT}",
+                        "error": f"EmuDeck directory not found: {scan_root}",
                         "stats": detection_stats,
                     }
                 ),
@@ -120,7 +124,7 @@ def scan_games():
         game_count = 0
         undetected_count = 0
 
-        for rom_file in EMUDECK_ROOT.rglob("*"):
+        for rom_file in scan_root.rglob("*"):
             if rom_file.is_file():
                 # Detect system for this ROM
                 system = detect_system(str(rom_file))

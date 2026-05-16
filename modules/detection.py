@@ -10,9 +10,16 @@ FOLDER_HINTS = {
     "ps2": ["ps2", "playstation2", "playstation 2"],
     "psx": ["psx", "playstation1", "playstation", "ps1", "ps-1"],
     "ps3": ["ps3", "playstation3", "playstation 3"],
+    "ps4": ["ps4", "playstation4", "playstation 4"],
+    "ps5": ["ps5", "playstation5", "playstation 5"],
+    "psp": ["psp", "playstationportable", "playstation portable"],
     "saturn": ["saturn", "sega saturn"],
     "segacd": ["segacd", "sega cd"],
     "dreamcast": ["dreamcast", "dc", "sega dc"],
+    "xboxone": ["xboxone", "xbox one"],
+    "xboxseriesx": ["xboxseriesx", "xbox series x", "xbox series", "xboxseries"],
+    "jaguarcd": ["jaguarcd", "jaguar cd"],
+    "dos": ["dos", "msdos"],
     "gc": ["gamecube", "gc"],
     "wii": ["wii"],
     "wiiu": ["wiiu", "wii u"],
@@ -97,7 +104,29 @@ def detect_system(file_path):
                 return sys
         return None
 
-    # Multiple candidates - use folder heuristics first
+    # Multiple candidates - first check folder heuristics across ALL known systems
+    # This ensures archive files (zip/7z) inherit the parent folder system
+    for system, hints in FOLDER_HINTS.items():
+        for hint in hints:
+            if hint in parent_path:
+                if system in SYSTEM_ROM_TYPES:
+                    if suffix in SYSTEM_ROM_TYPES[system]:
+                        return system
+                else:
+                    return system
+
+    # Fallback: check raw system IDs in parent path (covers folders like 'atari2600')
+    # For archive/ambiguous extensions, allow folder hint to override even if
+    # the system's SYSTEM_ROM_TYPES doesn't list the archive extension.
+    for system in SYSTEM_ROM_TYPES.keys():
+        if system in parent_path:
+            if (
+                suffix in SYSTEM_ROM_TYPES[system]
+                or suffix in AMBIGUOUS_EXTENSIONS
+            ):
+                return system
+
+    # Then prefer folder heuristics restricted to candidate list (legacy behavior)
     for system in candidates:
         if system in FOLDER_HINTS:
             for hint in FOLDER_HINTS[system]:

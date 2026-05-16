@@ -16,7 +16,7 @@ STEAMGRIDDB_API = "58e1ea89a891ec6dde2f818155da4146"
 
 # ScreenScraper
 SCREENSCRAPER_USER = "ChibiChan10"
-SCREENSCRAPER_PASSWORD = ""
+SCREENSCRAPER_PASSWORD = "Wasp1504"
 
 # ========= SCRAPER SETTINGS =========
 
@@ -74,7 +74,27 @@ SYSTEM_PRIORITY = [
 
 AMBIGUOUS_EXTENSIONS = {
     # ISO can be many disc-based systems
-    ".iso": ["ps2", "ps3", "ps4", "psx", "segacd", "dreamcast", "gc", "wii", "wiiu"],
+    ".iso": [
+        "ps2",
+        "ps3",
+        "ps4",
+        "ps5",
+        "psx",
+        "segacd",
+        "dreamcast",
+        "gc",
+        "wii",
+        "wiiu",
+        "xbox360",
+        "xboxone",
+        "xboxseriesx",
+        "psp",
+        "pcenginecd",
+        "jaguarcd",
+        "dos",
+    ],
+    # PKG files can be PS3, PS4 or PS5 packages
+    ".pkg": ["ps3", "ps4", "ps5"],
     # CUE files (cue/bin pairs)
     ".cue": ["psx", "segacd", "dreamcast", "pcenginecd"],
     ".bin": ["psx", "segacd", "dreamcast"],
@@ -240,7 +260,6 @@ SYSTEM_MAP = {
     ".toc": "psx",
     ".isz": "ps2",
     ".cso": "psp",
-    ".pkg": "ps3",
     ".ps3": "ps3",
     ".vpk": "psvita",
     # =====================================================

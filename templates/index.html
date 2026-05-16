@@ -53,12 +53,16 @@
             </div>
           </div>
 
-          <!-- Games by System (Top 10) -->
+          <!-- Games by System -->
           <div class="mb-3">
-            <h6>🎮 Top Systems</h6>
-            <div id="gamesBySystem" style="max-height: 250px; overflow-y: auto">
+            <h6>🎮 Active Systems</h6>
+            <div id="gamesBySystem" style="max-height: 400px; overflow-y: auto">
               <small class="text-muted">Loading...</small>
             </div>
+            <div class="mt-2">
+              <button id="toggleRawBtn" class="btn btn-sm btn-outline-secondary" onclick="toggleRaw()">Show raw JSON</button>
+            </div>
+            <pre id="rawStatus" style="display:none; max-height:300px; overflow:auto; background:#f8f9fa; padding:8px; border:1px solid #e1e1e1; margin-top:8px"></pre>
           </div>
 
           <!-- API Status -->
@@ -378,7 +382,15 @@ dats/
         btn.disabled = true;
         btn.innerHTML = "🔄 Scanning...";
 
-        fetch("/api/scan-games", { method: "POST" })
+        const emudeckPath = document.querySelector('[name="emudeck_path"]').value;
+        fetch("/api/scan-games", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({ emudeck_path: emudeckPath }),
+          cache: 'no-store',
+        })
           .then((r) => r.json())
           .then((data) => {
             if (data.success) {
@@ -402,7 +414,7 @@ dats/
 
       // Update status panel
       function updateStatusPanel() {
-        fetch("/api/status")
+        fetch("/api/status", { cache: 'no-store' })
           .then((r) => r.json())
           .then((data) => {
             // Update timestamp
@@ -429,21 +441,22 @@ dats/
                 '<small class="text-muted">No games detected yet. Click "Scan Games" to detect your collection.</small>';
             } else {
               let html = '<div class="list-group">';
-              const systems = Object.entries(
-                data.detection.games_by_system,
-              ).slice(0, 10);
+              const totalGames = data.detection.total_games || 1;
+              const systems = Object.entries(data.detection.games_by_system)
+                .filter(([s, c]) => c && c > 0)
+                .sort((a, b) => b[1] - a[1]);
               systems.forEach(([system, count]) => {
-                const percentage = Math.round(
-                  (count / data.detection.total_games) * 100,
-                );
+                const percentVal = (count / totalGames) * 100;
+                const displayPercent = count > 0 && percentVal < 1 ? "<1%" : `${percentVal.toFixed(1)}%`;
+                const barWidth = Math.min(100, percentVal);
                 html += `
                   <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <span>${system}</span>
+                    <span>${system} <small class="text-muted">(${count})</small></span>
                     <div class="d-flex align-items-center gap-2">
                       <div class="progress" style="width: 100px; height: 20px;">
-                        <div class="progress-bar" style="width: ${percentage}%" role="progressbar">${count}</div>
+                        <div class="progress-bar" style="width: ${barWidth}%" role="progressbar">${count}</div>
                       </div>
-                      <small class="text-muted">${percentage}%</small>
+                      <small class="text-muted">${displayPercent}</small>
                     </div>
                   </div>
                 `;
@@ -465,6 +478,10 @@ dats/
               apiHtml += `<div class="col-md-3 mb-2"><small>${displayName}: ${badge}</small></div>`;
             }
             apiStatus.innerHTML = apiHtml;
+
+            // Debug: raw JSON view (toggleable)
+            const raw = document.getElementById('rawStatus');
+            if (raw) raw.textContent = JSON.stringify(data, null, 2);
           })
           .catch((err) => {
             console.error("Status update error:", err);
@@ -476,6 +493,20 @@ dats/
       // Initial load and refresh every 5 seconds
       updateStatusPanel();
       setInterval(updateStatusPanel, 5000);
+
+      // Raw JSON toggle button
+      function toggleRaw() {
+        const pre = document.getElementById('rawStatus');
+        const btn = document.getElementById('toggleRawBtn');
+        if (!pre) return;
+        if (pre.style.display === 'none') {
+          pre.style.display = 'block';
+          btn.innerText = 'Hide raw JSON';
+        } else {
+          pre.style.display = 'none';
+          btn.innerText = 'Show raw JSON';
+        }
+      }
 
       // Update progress bar
       setInterval(() => {
