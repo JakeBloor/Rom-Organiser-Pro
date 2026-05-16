@@ -24,7 +24,11 @@ FOLDER_HINTS = {
     "genesis": ["genesis", "megadrive"],
 }
 
-ARCADE_KEYWORDS = ["arcade", "fbneo", "mame"]
+ARCADE_SYSTEM_KEYWORDS = {
+    "fbneo": ["fbneo", "neo geo", "neogeo"],
+    "mame": ["mame"],
+    "arcade": ["arcade"],
+}
 
 
 def clean_name(name):
@@ -42,9 +46,10 @@ def get_disc_number(name):
 def detect_arcade(path):
     p = str(path).lower()
 
-    for keyword in ARCADE_KEYWORDS:
-        if keyword in p:
-            return "fbneo"
+    for system, keywords in ARCADE_SYSTEM_KEYWORDS.items():
+        for keyword in keywords:
+            if keyword in p:
+                return system
 
     return None
 

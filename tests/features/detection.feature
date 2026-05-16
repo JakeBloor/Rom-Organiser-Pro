@@ -78,7 +78,7 @@ Feature: ROM System Detection
   Scenario: MAME ROM with arcade folder hint uses priority
     Given a ROM with path "/arcade/mame/mortal_kombat.7z"
     When the system detection runs
-    Then the detected system should be "fbneo"
+    Then the detected system should be "mame"
 
   Scenario: System priority configuration is complete
     When checking system priority configuration
