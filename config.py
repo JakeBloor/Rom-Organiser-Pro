@@ -15,7 +15,7 @@ MEDIA_DIR = Path("./media")
 STEAMGRIDDB_API = "58e1ea89a891ec6dde2f818155da4146"
 
 # ScreenScraper
-SCREENSCRAPER_USER = ""
+SCREENSCRAPER_USER = "ChibiChan10"
 SCREENSCRAPER_PASSWORD = ""
 
 # ========= SCRAPER SETTINGS =========
