@@ -6,6 +6,7 @@ from urllib.parse import quote
 import zipfile
 import io
 import gzip
+import shutil
 from pathlib import Path
 
 from config import DAT_DIR
@@ -465,6 +466,16 @@ class DATFetcher:
         """
         try:
             commit = commit_hash or self.DEFAULT_LIBRETRO_COMMIT
+            libretro_dir = DAT_DIR / "libretro"
+
+            if libretro_dir.exists():
+                shutil.rmtree(libretro_dir)
+                self.logger(
+                    f"Cleaned previous libretro DATs from {libretro_dir}",
+                    "INFO",
+                )
+
+            libretro_dir.mkdir(parents=True, exist_ok=True)
 
             zip_url = (
                 "https://github.com/libretro/" f"libretro-database/archive/{commit}.zip"
@@ -487,11 +498,16 @@ class DATFetcher:
 
             if content.startswith(b"PK"):
                 with zipfile.ZipFile(io.BytesIO(content)) as zf:
-                    dat_names = [n for n in zf.namelist() if n.lower().endswith(".dat")]
+                    dat_names = [
+                        n
+                        for n in zf.namelist()
+                        if n.lower().endswith(".dat")
+                        and "/dat/" in n.replace("\\", "/").lower()
+                    ]
 
                     if not dat_names:
                         self.logger(
-                            "No .dat files found in libretro archive",
+                            "No .dat files found in libretro archive dat/ directory",
                             "WARNING",
                         )
                         return False
@@ -501,39 +517,15 @@ class DATFetcher:
                     for name in dat_names:
                         try:
                             data = zf.read(name)
-
-                            # Preserve subfolder structure
-                            relative_path = Path(name)
-
-                            # Remove top-level archive folder
-                            relative_parts = relative_path.parts[1:]
-
-                            if not relative_parts:
-                                continue
-
-                            dest = DAT_DIR.joinpath(*relative_parts)
-
-                            dest.parent.mkdir(
-                                parents=True,
-                                exist_ok=True,
-                            )
-
+                            base = Path(name).name
+                            dest = libretro_dir / base
                             with open(dest, "wb") as f:
                                 f.write(data)
-
-                            if self._validate_dat_file(dest):
-                                extracted += 1
-
-                                self.logger(
-                                    f"Extracted DAT: {dest}",
-                                    "SUCCESS",
-                                )
-                            else:
-                                self.logger(
-                                    f"Rejected invalid DAT: {dest}",
-                                    "WARNING",
-                                )
-
+                            extracted += 1
+                            self.logger(
+                                f"Extracted DAT: {dest}",
+                                "SUCCESS",
+                            )
                         except Exception as e:
                             self.logger(
                                 f"Failed to extract {name}: {e}",
