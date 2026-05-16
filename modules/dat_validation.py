@@ -4,6 +4,16 @@ from config import DAT_DIR
 from modules.dat_fetcher import DATFetcher
 
 DAT_DB = {}
+IGNORED_DAT_DIRS = {"dat", "metadat", "rdb"}
+
+
+def _is_ignored_dat_path(dat_path):
+    try:
+        relative_parts = dat_path.relative_to(DAT_DIR).parts
+    except Exception:
+        return False
+
+    return any(part.lower() in IGNORED_DAT_DIRS for part in relative_parts)
 
 
 def _load_clrmamepro_dat(dat, logger):
@@ -68,7 +78,36 @@ def _load_clrmamepro_dat(dat, logger):
 def load_dat_files(logger):
     DAT_DB.clear()
 
-    for dat in DAT_DIR.rglob("*.dat"):
+    seen_names = set()
+    libretro_dir = DAT_DIR / "libretro"
+    use_libretro = libretro_dir.exists() and any(libretro_dir.rglob("*.dat"))
+
+    if use_libretro:
+        dat_files = sorted(
+            libretro_dir.rglob("*.dat"),
+            key=lambda p: (
+                len(p.relative_to(libretro_dir).parts),
+                p.relative_to(libretro_dir).as_posix(),
+            ),
+        )
+    else:
+        dat_files = sorted(
+            DAT_DIR.rglob("*.dat"),
+            key=lambda p: (
+                len(p.relative_to(DAT_DIR).parts),
+                p.relative_to(DAT_DIR).as_posix(),
+            ),
+        )
+
+    for dat in dat_files:
+        if not use_libretro and _is_ignored_dat_path(dat):
+            continue
+
+        if dat.name in seen_names:
+            continue
+
+        seen_names.add(dat.name)
+
         try:
             try:
                 tree = ET.parse(dat)

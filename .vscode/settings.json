@@ -5,6 +5,15 @@
         "/^source \\.venv/bin/activate && pytest -q 2>&1$/": {
             "approve": true,
             "matchCommandLine": true
-        }
+        },
+        "/^cd /Users/jakebloor/PycharmProjects/RomOrganiser && python3 - <<'PY'\nfrom pathlib import Path\nfrom modules\\.dat_validation import load_dat_files, DAT_DB, _is_ignored_dat_path\nfrom config import DAT_DIR\n\nprint\\('ignored root dat:', _is_ignored_dat_path\\(Path\\('dats/dat/Nintendo - Super Nintendo Entertainment System\\.dat'\\)\\)\\)\nprint\\('ignored metadat:', _is_ignored_dat_path\\(Path\\('dats/metadat/analog/some\\.dat'\\)\\)\\)\nprint\\('ignored libretro:', _is_ignored_dat_path\\(Path\\('dats/libretro/Nintendo - Super Nintendo Entertainment System\\.dat'\\)\\)\\)\n\nlogs = \\[\\]\ndef logger\\(msg, level='INFO'\\):\n    logs\\.append\\(\\(level, msg\\)\\)\n    print\\(msg\\)\n\nload_dat_files\\(logger\\)\nprint\\('loaded entries', len\\(DAT_DB\\)\\)\nprint\\('total log lines', len\\(logs\\)\\)\nprint\\('warn count', sum\\(1 for lvl,msg in logs if msg\\.startswith\\('\\[DAT WARN\\]'\\)\\)\\)\nprint\\('dat files processed', sum\\(1 for lvl,msg in logs if msg\\.startswith\\('\\[DAT\\] Loaded'\\)\\)\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        "/^cd /Users/jakebloor/PycharmProjects/RomOrganiser && python3 -m py_compile modules/dat_validation\\.py && python3 - <<'PY'\nfrom pathlib import Path\nfrom modules\\.dat_validation import load_dat_files, DAT_DB\n\nprint\\('compile ok'\\)\ncount_before = len\\(DAT_DB\\)\nload_dat_files\\(lambda msg, level='INFO': None\\)\nprint\\('loaded', len\\(DAT_DB\\), 'entries'\\)\nPY$/": {
+            "approve": true,
+            "matchCommandLine": true
+        },
+        ".venv/bin/pytest": true
     }
 }
