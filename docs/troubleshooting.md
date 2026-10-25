@@ -22,7 +22,10 @@ Two files in the import folder are the same ROM. Only the first one is moved; th
 
 Server settings (listen address, port and debug mode) only apply after a restart. Everything else applies straight away.
 
-If the Settings page says `settings.json` couldn't be read, fix the file or delete it to go back to the defaults. Deleting it also removes your saved API key and ScreenScraper login. Because the file is tracked in git, `git checkout settings.json` brings back the last committed version.
+If the Settings page says a settings file couldn't be read, fix that file or delete it:
+
+- **`settings.json`:** run `git checkout settings.json` to get back the last committed version. Deleting it puts every setting back to its default.
+- **`settings.local.json`:** deleting it removes your saved API key and ScreenScraper login, so enter them again on the Settings page.
 
 ## No game data, videos or manuals
 

@@ -17,7 +17,7 @@ modules/
   artwork.py           libretro and SteamGridDB downloads
   scraper.py           Runs Skyscraper for game data and extra media
   srm.py               Fills in Steam ROM Manager's local image paths
-  settings.py          User settings: fields, defaults, checks, settings.json
+  settings.py          User settings: fields, defaults, checks, settings files
   esde.py              Reads ROM and media folders from ES-DE's settings
   m3u.py               Writes playlist entries
   logging_utils.py     Log kept in memory for the page, and in files under logs/
@@ -50,7 +50,7 @@ The page asks for `GET /status` every second, and draws the progress and the rep
 `modules/settings.py` describes every user setting as a `Field`: key, label, kind, default, group, help text, limits, and whether it needs a restart. The Settings page is built from that list, so a new setting only has to be added there.
 
 - **Reading.** Code calls `settings.get("key")`, or `settings.path("key")` for folders (`~` expanded, `None` when blank), at the moment it needs the value. Never import a setting's value at module level, or changes made on the Settings page won't reach that code.
-- **Saving.** `settings.save(updates)` checks every value. If any fail, it saves nothing and returns `{key: message}`. Otherwise it writes `settings.json` through a temporary file, so a failed write never leaves half a file.
+- **Saving.** `settings.save(updates)` checks every value. If any fail, it saves nothing and returns `{key: message}`. Otherwise it writes account details (secrets, and fields marked `local=True`) to the git-ignored `settings.local.json`, and everything else to `settings.json`. Each file is written through a temporary file, so a failed write never leaves half a file.
 - **Secrets.** A secret sent as `null` keeps the saved value. `settings.public_values()` replaces secrets with `true` or `false` before anything goes to the page.
 
 ## Running the tests
@@ -66,12 +66,12 @@ The tests use [pytest-bdd](https://pytest-bdd.readthedocs.io). Each area has a f
 
 Coverage is configured in `.coveragerc`: branch coverage over `app`, `config` and `modules`, with `fail_under = 100`. Only the `if __name__ == "__main__":` block is excluded.
 
-The tests never touch the network, your real folders or your real `settings.json`:
+The tests never touch the network, your real folders or your real settings files:
 
 - **HTTP** is replaced with fake responses (`modules.artwork.requests.get`).
 - **Folders and Steam ROM Manager settings** live in `tmp_path`.
 - **ES-DE's folders** come from patched `esde.rom_root` and `esde.media_root`.
-- **Settings:** an autouse fixture in `tests/conftest.py` points `settings.SETTINGS_FILE` at `tmp_path` and starts each test from the defaults. Tests change a setting with `monkeypatch.setitem(settings.current, "key", value)`.
+- **Settings:** an autouse fixture in `tests/conftest.py` points `settings.SETTINGS_FILE` and `settings.LOCAL_SETTINGS_FILE` at `tmp_path` and starts each test from the defaults. Tests change a setting with `monkeypatch.setitem(settings.current, "key", value)`.
 
 ## Adding a system
 

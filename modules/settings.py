@@ -1,9 +1,12 @@
 """
-User settings, kept in settings.json in the app folder and edited on the
-Settings page. Modules read them when they need them (settings.get(...)), so
-changes apply straight away; server settings apply on the next start.
+User settings, edited on the Settings page and kept in two files in the app
+folder:
 
-settings.json is tracked in git, account details included.
+- settings.json, tracked in git: everything except account details
+- settings.local.json, ignored by git: API keys, passwords and user names
+
+Modules read settings when they need them (settings.get(...)), so changes
+apply straight away; server settings apply on the next start.
 """
 
 import json
@@ -12,7 +15,9 @@ import tempfile
 from dataclasses import dataclass
 from pathlib import Path
 
-SETTINGS_FILE = Path(__file__).resolve().parent.parent / "settings.json"
+APP_DIR = Path(__file__).resolve().parent.parent
+SETTINGS_FILE = APP_DIR / "settings.json"
+LOCAL_SETTINGS_FILE = APP_DIR / "settings.local.json"
 
 LOOPBACK_HOSTS = {"127.0.0.1", "localhost", "::1"}
 
@@ -29,6 +34,8 @@ class Field:
     minimum: int = 0
     maximum: int = 0
     restart: bool = False
+    # Account details kept out of git in settings.local.json; secrets always are
+    local: bool = False
 
 
 FIELDS = (
@@ -51,7 +58,7 @@ FIELDS = (
           "Free from steamgriddb.com, under Preferences > API."),
     Field("enable_screenscraper", "Scrape game data with Skyscraper", "bool", True, "Game data",
           "Runs after organising when Skyscraper is installed."),
-    Field("screenscraper_user", "ScreenScraper user name", "text", "", "Game data"),
+    Field("screenscraper_user", "ScreenScraper user name", "text", "", "Game data", local=True),
     Field("screenscraper_password", "ScreenScraper password", "secret", "", "Game data"),
     Field("scraper_region", "Preferred region", "text", "us", "Game data",
           "For box art and data, e.g. us, eu, jp, wor."),
@@ -68,10 +75,11 @@ FIELDS = (
 
 FIELDS_BY_KEY = {field.key: field for field in FIELDS}
 DEFAULTS = {field.key: field.default for field in FIELDS}
+LOCAL_KEYS = {field.key for field in FIELDS if field.local or field.kind == "secret"}
 
 # The settings in use, updated in place by load() and save()
 current = dict(DEFAULTS)
-# Why settings.json couldn't be read, shown on the Settings page
+# Why a settings file couldn't be read, shown on the Settings page
 load_error = None
 
 
@@ -85,26 +93,36 @@ def path(key):
     return Path(value).expanduser() if value else None
 
 
+def _read(settings_file):
+    """Returns (values, problem) from one settings file. A missing file has no values."""
+    try:
+        stored = json.loads(settings_file.read_text())
+    except FileNotFoundError:
+        return {}, None
+    except (OSError, ValueError) as e:
+        return {}, f"Couldn't read {settings_file.name}, so defaults are in use for it: {e}"
+
+    values, errors = _validate(stored if isinstance(stored, dict) else {})
+    if errors or not isinstance(stored, dict):
+        return values, f"Some settings in {settings_file.name} were invalid and defaults are in use for them."
+    return values, None
+
+
 def load():
-    """Reads settings.json over the defaults. A missing file just means defaults."""
+    """Reads settings.json, then settings.local.json, over the defaults."""
     global load_error
 
     current.clear()
     current.update(DEFAULTS)
-    load_error = None
+    problems = []
 
-    try:
-        stored = json.loads(SETTINGS_FILE.read_text())
-    except FileNotFoundError:
-        return current
-    except (OSError, ValueError) as e:
-        load_error = f"Couldn't read {SETTINGS_FILE.name}, so defaults are in use: {e}"
-        return current
+    for settings_file in (SETTINGS_FILE, LOCAL_SETTINGS_FILE):
+        values, problem = _read(settings_file)
+        current.update(values)
+        if problem:
+            problems.append(problem)
 
-    values, errors = _validate(stored if isinstance(stored, dict) else {})
-    current.update(values)
-    if errors or not isinstance(stored, dict):
-        load_error = f"Some settings in {SETTINGS_FILE.name} were invalid and defaults are in use for them."
+    load_error = " ".join(problems) or None
     return current
 
 
@@ -147,9 +165,10 @@ def _validate(updates):
 
 def save(updates):
     """
-    Validates updates, writes them to settings.json and applies them. A secret
-    sent as None is left as it is. Returns {key: message} for invalid
-    settings, in which case nothing is saved.
+    Validates updates, saves them and applies them: account details to
+    settings.local.json, everything else to settings.json. A secret sent as
+    None is left as it is. Returns {key: message} for invalid settings, in
+    which case nothing is saved.
     """
     updates = {
         key: value
@@ -168,20 +187,23 @@ def save(updates):
     if errors:
         return errors
 
-    _write(merged)
+    # Account details first, so a failed write can't leave them only in memory
+    _write(LOCAL_SETTINGS_FILE, {key: merged[key] for key in sorted(LOCAL_KEYS)}, 0o600)
+    _write(SETTINGS_FILE, {key: value for key, value in merged.items() if key not in LOCAL_KEYS}, 0o644)
     current.update(values)
     return {}
 
 
-def _write(values):
+def _write(settings_file, values, mode):
     # Written to a temporary file first so a failed write never leaves half a file
-    SETTINGS_FILE.parent.mkdir(parents=True, exist_ok=True)
-    fd, temporary = tempfile.mkstemp(dir=SETTINGS_FILE.parent, prefix=".settings-", suffix=".json")
+    settings_file.parent.mkdir(parents=True, exist_ok=True)
+    fd, temporary = tempfile.mkstemp(dir=settings_file.parent, prefix=".settings-", suffix=".json")
     try:
         with os.fdopen(fd, "w") as file:
             json.dump(values, file, indent=2)
-        os.chmod(temporary, 0o600)
-        os.replace(temporary, SETTINGS_FILE)
+            file.write("\n")
+        os.chmod(temporary, mode)
+        os.replace(temporary, settings_file)
     except BaseException:
         os.unlink(temporary)
         raise

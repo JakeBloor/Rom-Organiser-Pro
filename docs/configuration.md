@@ -2,11 +2,20 @@
 
 Change settings on the **Settings** page: click **⚙️ Settings** at the top of the home page, or go to `http://127.0.0.1:8181/settings`. Click **Save settings** to store them.
 
-Settings are saved in `settings.json` in the app folder. Most apply straight away. Server settings are marked **Applies after restart**, and the page tells you when a restart is needed.
+Most settings apply straight away. Server settings are marked **Applies after restart**, and the page tells you when a restart is needed.
 
-`settings.json` is tracked in git, and it includes your API key and ScreenScraper password. Anyone who can see the repository can read and use them. On disk, it's saved with owner-only permissions (`600`).
+Settings are saved in two files in the app folder:
 
-If the file is missing, every setting uses its default. If the file is broken, the Settings page and the startup log say so and the defaults are used.
+| File | Holds | In git |
+|---|---|---|
+| `settings.json` | Every setting except your account details | Yes |
+| `settings.local.json` | Your SteamGridDB API key, and your ScreenScraper user name and password | No, it's in `.gitignore` |
+
+The Settings page puts each value in the right file. `settings.local.json` can only be read by your user account (permissions `600`).
+
+On a new machine, check out the repo, open the Settings page and enter your account details again; that creates `settings.local.json`. If you edit the files by hand, a value in `settings.local.json` overrides the same value in `settings.json`.
+
+If a file is missing, its settings use their defaults. If a file is broken, the Settings page and the startup log say which one, and the defaults are used for it.
 
 ## Folders
 

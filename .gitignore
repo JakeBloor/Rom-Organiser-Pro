@@ -223,3 +223,6 @@ __marimo__/
 
 # Downloaded on startup from the libretro database
 dats/libretro/
+
+# Secrets for settings.json: API keys and passwords
+settings.local.json

@@ -150,7 +150,7 @@ Saves the settings you send. Leave out any you don't want to change. For a secre
 |---|---|
 | `200` | Saved. The response has the same shape as `GET /api/settings`, plus `"saved": true`. |
 | `400` | `{"errors": {"port": "Must be between 1 and 65535."}}`. Nothing was saved. |
-| `500` | `settings.json` couldn't be written. |
+| `500` | A settings file couldn't be written. |
 
 Setting keys: `esde_home`, `default_rom_folder`, `steam_artwork_dir`, `srm_config`, `multi_file_layout` (`shared` or `esde`), `enable_libretro_thumbnails`, `enable_steamgriddb`, `steamgriddb_api`, `enable_screenscraper`, `screenscraper_user`, `screenscraper_password`, `scraper_region`, `scraper_language`, `scraper_threads`, `host`, `port` and `debug`.
 

@@ -1,4 +1,4 @@
-Feature: Settings saved in settings.json and edited on the Settings page
+Feature: Settings saved in settings.json and settings.local.json, edited on the Settings page
 
   Scenario: Defaults are used when there's no settings file
     Then the "port" setting should be 8181
@@ -16,16 +16,27 @@ Feature: Settings saved in settings.json and edited on the Settings page
     Then the "port" setting should be 9000
     And the "screenscraper_user" setting should be "player one"
     And the "enable_steamgriddb" setting should be off
-    And settings.json should be readable only by its owner
+    And settings.local.json should be readable only by its owner
     When the settings are loaded again
     Then the "scraper_region" setting should be "eu"
+    And the "screenscraper_user" setting should be "player one"
+
+  Scenario: Account details are kept out of the tracked settings.json
+    When the settings are saved with
+      | key                    | value      |
+      | steamgriddb_api        | the-key    |
+      | screenscraper_user     | player one |
+      | screenscraper_password | hunter2    |
+      | scraper_region         | eu         |
+    Then settings.json should hold "scraper_region" but not "steamgriddb_api, screenscraper_user, screenscraper_password"
+    And settings.local.json should hold only "screenscraper_password, screenscraper_user, steamgriddb_api"
 
   Scenario Outline: Invalid settings are refused and nothing is saved
     When the settings are saved with
       | key   | value   |
       | <key> | <value> |
     Then saving should fail for "<key>" with "<message>"
-    And there should be no settings.json
+    And there should be no settings files
 
     Examples:
       | key               | value | message                   |
@@ -62,17 +73,18 @@ Feature: Settings saved in settings.json and edited on the Settings page
       | not_a_real | x     |
     Then saving should succeed
 
-  Scenario Outline: A broken settings.json falls back to the defaults
-    Given settings.json contains '<contents>'
+  Scenario Outline: A broken settings file falls back to the defaults
+    Given <file> contains '<contents>'
     When the settings are loaded again
     Then the "port" setting should be 8181
-    And the settings should report "<problem>"
+    And the settings should report "<problem>" for "<file>"
 
     Examples:
-      | contents          | problem                 |
-      | {not json         | Couldn't read           |
-      | ["a list"]        | were invalid            |
-      | {"port": "lots"}  | were invalid            |
+      | file                | contents          | problem       |
+      | settings.json       | {not json         | Couldn't read |
+      | settings.json       | ["a list"]        | were invalid  |
+      | settings.json       | {"port": "lots"}  | were invalid  |
+      | settings.local.json | {not json         | Couldn't read |
 
   Scenario: A failed write leaves settings.json as it was
     Given the SteamGridDB API key "old-key" is saved
@@ -81,5 +93,5 @@ Feature: Settings saved in settings.json and edited on the Settings page
       | key             | value   |
       | steamgriddb_api | new-key |
     Then saving should raise "disk full"
-    And settings.json should still hold "old-key"
+    And settings.local.json should still hold "old-key"
     And no temporary settings files should be left

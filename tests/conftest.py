@@ -27,10 +27,11 @@ def clear_app_logger():
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    """Every test starts from the default settings and never sees the real settings.json or ES-DE."""
+    """Every test starts from the default settings and never sees the real settings files or ES-DE."""
     from modules import settings
 
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
+    monkeypatch.setattr(settings, "LOCAL_SETTINGS_FILE", tmp_path / "settings.local.json")
     settings.load()
     monkeypatch.setitem(settings.current, "esde_home", str(tmp_path / "no-ES-DE"))
     yield
