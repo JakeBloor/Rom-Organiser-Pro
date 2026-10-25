@@ -229,3 +229,8 @@ settings.local.json
 
 # Checksums and outcomes the app remembers about ROM files
 cache/
+
+# Downloaded on startup from FinalBurn Neo
+dats/fbneo/
+dats/fbneo.partial/
+dats/libretro.partial/

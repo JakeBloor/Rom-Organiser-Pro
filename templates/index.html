@@ -148,6 +148,24 @@
             </label>
           </div>
 
+          <div class="form-check form-switch mb-3">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              role="switch"
+              name="force"
+              id="forceAll"
+              aria-describedby="forceAllHelp"
+              onchange="updateRunButton()"
+            />
+            <label class="form-check-label" for="forceAll">Re-organise everything</label>
+            <div class="form-text" id="forceAllHelp">
+              Forgets what the app has organised and works through the whole ROM folder again:
+              every game is checked against the DATs and for duplicates, and given any missing
+              artwork. Games already in place aren't moved. Slow on a big library.
+            </div>
+          </div>
+
           <div class="row gap-2">
             <div class="col">
               <button
@@ -254,6 +272,7 @@
             <div class="col-lg-6" id="reportSystems"></div>
             <div class="col-lg-6" id="reportEsdeMedia"></div>
             <div class="col-lg-6" id="reportSteamMedia"></div>
+            <div class="col-lg-6" id="reportDat"></div>
           </div>
           <div id="reportUnsorted" class="mt-3"></div>
         </section>
@@ -776,7 +795,25 @@ dats/
           : "📈 Run report";
         document.getElementById("reportSummary").textContent =
           `${organised} ${organised === 1 ? "file" : "files"} ${report.dry_run ? "would be organised" : "organised"}` +
-          ` · ${report.dat_matches} matched a DAT · finished ${finished}`;
+          ` · ${report.dat_matches + report.serial_matches + report.name_matches} matched a DAT · finished ${finished}`;
+
+        const matched = report.dat_matches + report.serial_matches + report.name_matches;
+        const misses = Object.values(report.dat_misses).reduce((sum, count) => sum + count, 0);
+        renderBarChart(
+          document.getElementById("reportDat"),
+          "DAT matches",
+          countRows(
+            [
+              ["Matched by checksum", report.dat_matches],
+              ["Matched by serial", report.serial_matches],
+              ["Matched by name", report.name_matches],
+              ...Object.entries(report.dat_misses).sort((a, b) => b[1] - a[1]),
+            ],
+            matched + misses,
+            "games",
+          ),
+          { emptyText: "No games were checked against the DATs." },
+        );
 
         const outcomes = Object.entries(report.outcomes);
         const files = outcomes.reduce((sum, [, count]) => sum + count, 0);
@@ -807,7 +844,7 @@ dats/
         unsorted.replaceChildren();
         if (report.unsorted_files.length) {
           unsorted.append(
-            el("h6", "chart-title", "Left in the import folder"),
+            el("h6", "chart-title", "Left where you dropped them"),
             el("p", "small text-body-secondary mb-1",
               "The app couldn't tell which system these are for. Put each in a folder named after its system (e.g. ps2/) and run again."),
           );
@@ -893,7 +930,10 @@ dats/
       function updateRunButton() {
         const btn = document.getElementById("organiseBtn");
         const dryRun = document.getElementById("dryRun").checked;
-        btn.textContent = dryRun ? "Preview (dry run)" : "Organise and move files";
+        const force = document.getElementById("forceAll").checked;
+        btn.textContent = force
+          ? dryRun ? "Preview re-organising everything" : "Re-organise everything"
+          : dryRun ? "Preview (dry run)" : "Organise and move files";
         btn.classList.toggle("btn-primary", dryRun);
         btn.classList.toggle("btn-danger", !dryRun);
       }
@@ -967,6 +1007,7 @@ dats/
           body: JSON.stringify({
             rom_root: document.getElementById("romRoot").value,
             dry_run: document.getElementById("dryRun").checked,
+            force: document.getElementById("forceAll").checked,
           }),
         })
           .then(async (r) => {
@@ -1026,7 +1067,7 @@ dats/
 
             const stats = {
               statProcessed: data.roms_processed,
-              statDat: data.dat_matches,
+              statDat: data.dat_matches + data.serial_matches + data.name_matches,
               statArtwork: data.artwork_downloads,
               statDuplicates: data.duplicates,
               statUnsorted: data.unsorted,
@@ -1042,7 +1083,7 @@ dats/
             if (atBottom) log.scrollTop = log.scrollHeight;
 
             document.getElementById("organiseBtn").disabled = data.running;
-            for (const id of ["romRoot", "dryRun"]) {
+            for (const id of ["romRoot", "dryRun", "forceAll"]) {
               document.getElementById(id).disabled = data.running;
             }
 

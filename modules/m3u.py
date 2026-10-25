@@ -1,11 +1,16 @@
-def append_to_m3u(folder, game_name, filename):
-    m3u = folder / f"{game_name}.m3u"
+"""
+Reading and writing .m3u playlists: one entry per line, relative to the playlist.
+"""
 
-    entries = []
 
-    if m3u.exists():
-        entries = m3u.read_text().splitlines()
+def read_m3u(path):
+    """The entries in a playlist, without blank lines or # comments."""
+    try:
+        lines = path.read_text(errors="ignore").splitlines()
+    except OSError:
+        return []
+    return [line.strip() for line in lines if line.strip() and not line.startswith("#")]
 
-    if filename not in entries:
-        with open(m3u, "a", encoding="utf-8") as f:
-            f.write(filename + "\n")
+
+def write_m3u(path, entries):
+    path.write_text("".join(entry + "\n" for entry in entries), encoding="utf-8")

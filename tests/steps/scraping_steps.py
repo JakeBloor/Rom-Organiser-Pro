@@ -225,3 +225,8 @@ def skyscraper_no_input(scrape_context):
 @then("Skyscraper should have been stopped")
 def skyscraper_stopped(scrape_context):
     assert scrape_context["terminated"] is True
+
+
+@then(parsers.parse('the gather command should scrape platform "{platform}"'))
+def gather_platform(scrape_context, platform):
+    assert option(scrape_context["gather"], "-p") == platform

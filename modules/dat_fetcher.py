@@ -1,3 +1,5 @@
+from urllib.parse import quote
+
 import requests
 import zipfile
 import io
@@ -10,11 +12,18 @@ from config import DAT_DIR
 class DATFetcher:
     """Fetches and manages DAT files from various sources"""
 
-    # Libretro database commit to fetch from
-    DEFAULT_LIBRETRO_COMMIT = "559696d00979f4f3c593a1ee2c7aef0ed4c47695"
+    # Libretro database commit to fetch from (master on 2026-10-25)
+    DEFAULT_LIBRETRO_COMMIT = "d5e2e4d2453e3726f6c6a569b0504653eca436ff"
 
     # Archive folders to extract; metadat/ holds the No-Intro and Redump DATs
     LIBRETRO_DAT_PREFIXES = ("dat/", "metadat/no-intro/", "metadat/redump/")
+
+    # FinalBurn Neo's arcade DATs: arcade zip names ("sf2") and their titles
+    DEFAULT_FBNEO_COMMIT = "2b0c1c0679df115cada7df9199ea2762222e58fd"
+    FBNEO_DATS = (
+        "FinalBurn Neo (ClrMame Pro XML, Arcade only).dat",
+        "FinalBurn Neo (ClrMame Pro XML, Neogeo only).dat",
+    )
 
     def __init__(self, logger):
         self.logger = logger
@@ -132,6 +141,47 @@ class DATFetcher:
                 "ERROR",
             )
             return False
+
+    def fetch_fbneo_dats(self, commit_hash=None):
+        """
+        Download FinalBurn Neo's arcade and Neo Geo DATs into dats/fbneo/,
+        skipping the download while that commit's files are already there.
+        """
+        commit = commit_hash or self.DEFAULT_FBNEO_COMMIT
+        fbneo_dir = DAT_DIR / "fbneo"
+        marker = fbneo_dir / ".commit"
+
+        if (
+            marker.exists()
+            and marker.read_text().strip() == commit
+            and all((fbneo_dir / name).exists() for name in self.FBNEO_DATS)
+        ):
+            self.logger(f"FinalBurn Neo DATs for {commit[:7]} already present, skipping download")
+            return True
+
+        # Downloaded into a staging folder so a failure keeps the DATs on disk
+        staging_dir = DAT_DIR / "fbneo.partial"
+        shutil.rmtree(staging_dir, ignore_errors=True)
+        staging_dir.mkdir(parents=True)
+
+        try:
+            for name in self.FBNEO_DATS:
+                url = f"https://raw.githubusercontent.com/libretro/FBNeo/{commit}/dats/{quote(name)}"
+                self.logger(f"Fetching {name}")
+                response = requests.get(url, timeout=60)
+                response.raise_for_status()
+                (staging_dir / name).write_bytes(response.content)
+        except requests.exceptions.RequestException as e:
+            shutil.rmtree(staging_dir, ignore_errors=True)
+            self.logger(f"Failed to download FinalBurn Neo DATs: {e}", "ERROR")
+            return False
+
+        marker_file = staging_dir / ".commit"
+        marker_file.write_text(commit)
+        shutil.rmtree(fbneo_dir, ignore_errors=True)
+        staging_dir.rename(fbneo_dir)
+        self.logger("FinalBurn Neo DATs downloaded", "SUCCESS")
+        return True
 
     def fetch_libretro_dats(self, commit_hash=None):
         """

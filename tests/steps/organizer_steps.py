@@ -469,3 +469,143 @@ def placed_titles(organiser_context, titles):
 @then("nothing should be waiting to be organised")
 def nothing_waiting(organiser_context):
     assert pending_games(organiser_context["rom_root"], organiser_context["cache"]) == {}
+
+
+@given(parsers.parse('the DATs know "{name}" for "{system}" in "{dat_title}" by name'))
+def dats_know_name(monkeypatch, name, system, dat_title):
+    from modules.dat_validation import DAT_NAMES, name_key
+
+    monkeypatch.setitem(DAT_NAMES, name_key(name), {system: (name, system, dat_title)})
+
+
+@given(parsers.parse('a CHD "{relative_path}" whose header records SHA-1 "{sha1}"'))
+def chd_dropped(organiser_context, relative_path, sha1):
+    header = bytearray(0x7C)
+    header[:8] = b"MComprHD"
+    header[12:16] = (5).to_bytes(4, "big")
+    header[0x40:0x54] = bytes.fromhex(sha1)
+    path = organiser_context["rom_root"] / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(header) + b"hunks")
+
+
+@given(parsers.parse('the DATs list SHA-1 "{sha1}" as "{name}" for "{system}" in "{dat_title}"'))
+def dats_list_sha1(monkeypatch, sha1, name, system, dat_title):
+    monkeypatch.setitem(DAT_DB, sha1, (name, system, dat_title))
+
+
+@given(parsers.parse('"{relative_path}" is dropped into the ROM folder with a 512-byte copier header'))
+def snes_with_header(organiser_context, relative_path):
+    path = organiser_context["rom_root"] / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    organiser_context["headerless"] = b"chrono" * 2048
+    path.write_bytes(b"\0" * 512 + organiser_context["headerless"])
+
+
+@given(parsers.parse('the DATs list the ROM without its header as "{name}" for "{system}" in "{dat_title}"'))
+def dats_list_headerless(organiser_context, monkeypatch, name, system, dat_title):
+    digest = hashlib.md5(organiser_context["headerless"]).hexdigest()
+    monkeypatch.setitem(DAT_DB, digest, (name, system, dat_title))
+
+
+@then(parsers.parse('the placed game should come from the DAT "{dat_title}"'))
+def placed_from_dat(organiser_context, dat_title):
+    (game,) = organiser_context["placed"]
+    assert game["dat_title"] == dat_title
+
+
+@then("the DAT misses should be")
+def dat_misses_are(organiser_context, datatable):
+    expected = {reason: int(games) for reason, games in datatable[1:]}
+    assert organiser_context["status"]["dat_misses"] == expected
+
+
+@given(parsers.parse('the DATs know serial "{serial}" as "{name}" for "{system}" in "{dat_title}"'))
+def dats_know_serial(monkeypatch, serial, name, system, dat_title):
+    from modules import dat_validation
+
+    monkeypatch.setattr(dat_validation, "DAT_SERIALS", {})
+    dat_validation._add_serials((name, system, dat_title), f'serial "{serial}"')
+
+
+@given(parsers.parse('a Wii-style image "{relative_path}" with game ID "{game_id}" is dropped into the ROM folder'))
+def nintendo_image(organiser_context, relative_path, game_id):
+    header = bytearray(0x58 + 0x20)
+    header[:4] = b"RVZ\x01"
+    header[0x58:0x5E] = game_id.encode()
+    header[0x58 + 0x1C:0x58 + 0x20] = bytes.fromhex("C2339F3D")
+    path = organiser_context["rom_root"] / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(bytes(header) + b"compressed")
+
+
+@given(parsers.parse('a PS3 disc folder "{relative_path}" with serial "{serial}" is dropped into the ROM folder'))
+def ps3_disc_with_serial(organiser_context, relative_path, serial):
+    from tests.sfo import make_sfo
+
+    folder = organiser_context["rom_root"] / relative_path / "PS3_GAME"
+    folder.mkdir(parents=True)
+    (folder / "PARAM.SFO").write_bytes(make_sfo({"TITLE_ID": serial, "TITLE": "DEMONS SOULS"}))
+
+
+@given(parsers.parse('the DATs know "{zip_name}" as "{title}" for "{system}" in "{dat_title}" by zip name'))
+def dats_know_zip(monkeypatch, zip_name, title, system, dat_title):
+    from modules.dat_validation import DAT_NAMES, name_key
+
+    monkeypatch.setitem(DAT_NAMES, name_key(zip_name), {system: (title, system, dat_title)})
+
+
+@then(parsers.parse('the sheet "{relative_path}" should point at "{tracks}"'))
+def sheet_points_at_track(organiser_context, relative_path, tracks):
+    from modules.archives import sheet_tracks
+
+    sheet = organiser_context["rom_root"] / relative_path
+    tracks = tracks.split(" | ")
+    for track in tracks:
+        assert f'"{track}"' in sheet.read_text()
+    assert [t.resolve() for t in sheet_tracks(sheet)] == [(sheet.parent / t).resolve() for t in tracks]
+
+
+@given(parsers.parse('"{relative_path}" in the ROM folder points at "{tracks}"'))
+def sheet_in_rom_folder(organiser_context, relative_path, tracks):
+    sheet = organiser_context["rom_root"] / relative_path
+    sheet.parent.mkdir(parents=True, exist_ok=True)
+    sheet.write_text("".join(f'FILE "{track}" BINARY\n  TRACK 01 MODE1/2352\n' for track in tracks.split(" | ")))
+
+
+@given(parsers.parse('"{relative_path}" in the ROM folder lists "{entries}"'))
+def playlist_in_rom_folder(organiser_context, relative_path, entries):
+    playlist = organiser_context["rom_root"] / relative_path
+    playlist.parent.mkdir(parents=True, exist_ok=True)
+    playlist.write_text("".join(entry + "\n" for entry in entries.split(" | ")))
+
+
+def repair(organiser_context, dry_run):
+    from modules.organizer import repair_playlists
+
+    organiser_context["repaired"] = repair_playlists(
+        organiser_context["rom_root"],
+        lambda message, level="INFO": organiser_context["log"].append(message),
+        dry_run,
+    )
+
+
+@when("the playlists are repaired")
+def playlists_repaired(organiser_context):
+    repair(organiser_context, dry_run=False)
+
+
+@when("the playlists are repaired in dry-run mode")
+def playlists_repaired_dry_run(organiser_context):
+    repair(organiser_context, dry_run=True)
+
+
+@then(parsers.parse("{count:d} playlist should have been repaired"))
+def playlists_repaired_count(organiser_context, count):
+    assert organiser_context["repaired"] == count
+
+
+@then(parsers.parse('the playlist "{relative_path}" should still read "{entries}"'))
+def playlist_reads(organiser_context, relative_path, entries):
+    playlist = organiser_context["rom_root"] / relative_path
+    assert playlist.read_text().splitlines() == entries.split(" | ")

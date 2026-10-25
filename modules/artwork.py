@@ -5,7 +5,7 @@ from urllib.parse import quote
 
 import requests
 
-from config import DAT_SYSTEM_IDS
+from config import DAT_SYSTEM_IDS, canonical_system
 from modules import settings
 from modules.detection import clean_name
 from modules.media import (
@@ -69,7 +69,7 @@ def _save(path, content):
 
 
 def _fetch_libretro(game, media_root, logger):
-    folder = game.get("dat_title") or LIBRETRO_SYSTEM_NAMES.get(game["system"])
+    folder = game.get("dat_title") or LIBRETRO_SYSTEM_NAMES.get(canonical_system(game["system"]))
     if not folder:
         return []
 

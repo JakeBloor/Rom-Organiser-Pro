@@ -125,3 +125,13 @@ def no_temporary_cache_files(cache_context):
 @when("an unknown file is moved")
 def unknown_file_moved(cache_context):
     cache_context["cache"].moved(rom(cache_context, "Unknown.sfc"), rom(cache_context, "snes/Unknown.sfc"))
+
+
+@when(parsers.parse('everything under "{folder}" is forgotten'))
+def forget_folder(cache_context, folder):
+    cache_context["forgotten"] = cache_context["cache"].forget_under(rom(cache_context, folder))
+
+
+@then(parsers.parse("{count:d} entry should have been forgotten"))
+def entries_forgotten(cache_context, count):
+    assert cache_context["forgotten"] == count

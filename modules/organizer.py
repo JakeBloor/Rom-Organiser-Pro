@@ -11,15 +11,23 @@ from config import (
     MULTI_FILE_DIR,
     SYSTEM_MAP,
     SYSTEM_ROM_TYPES,
+    canonical_system,
 )
 from modules import esde, settings
-from modules.archives import is_ps3_folder, ps3_title, sheet_tracks
+from modules.archives import (
+    disc_serial,
+    is_ps3_folder,
+    ps3_serial,
+    ps3_title,
+    rewrite_sheet,
+    sheet_tracks,
+)
 import time
 
-from modules.hashing import fingerprint, hash_rom
-from modules.dat_validation import lookup_hashes
+from modules.hashing import chd_sha1s, fingerprint, hash_rom
+from modules.dat_validation import lookup_hashes, lookup_name, lookup_serial
 from modules.detection import DISC_REGEX, _accepts, detect_system, clean_name, get_disc_number
-from modules.m3u import append_to_m3u
+from modules.m3u import read_m3u, write_m3u
 
 ARCADE_SYSTEMS = {"fbneo", "arcade", "mame"}
 SHEET_SUFFIXES = {".cue", ".gdi"}
@@ -68,26 +76,47 @@ def _identify(path, cache, on_bytes=None):
     """
     Checksums for a DAT lookup, or just a fingerprint for files that can't
     match a DAT (compressed images) or are too big to be worth reading in
-    full. Either way "identity" tells duplicates apart. Reuses the cache.
+    full. A CHD also gives the SHA-1s in its header. Either way "identity"
+    tells duplicates apart. Reuses the cache.
     """
     entry = cache.get(path) if cache else None
     if entry and "identity" in entry:
-        return {key: entry[key] for key in ("md5", "sha1", "identity") if key in entry}
+        return {key: entry[key] for key in HASH_FIELDS if key in entry}
 
     limit = settings.get("dat_check_limit_mb") * 1024 * 1024
-    if path.suffix.lower() in UNMATCHABLE_SUFFIXES or path.stat().st_size > limit:
+    if path.suffix.lower() == ".chd":
+        hashes = {"identity": fingerprint(path)}
+        for key, sha1 in zip(("sha1", "sha1_overall"), chd_sha1s(path)):
+            hashes[key] = sha1
+    elif path.suffix.lower() in UNMATCHABLE_SUFFIXES or path.stat().st_size > limit:
         hashes = {"identity": fingerprint(path)}
     else:
         hashes = hash_rom(path, on_bytes)
         hashes["identity"] = hashes["md5"]
+
+    serial = disc_serial(path)
+    if serial:
+        hashes["serial"] = serial
 
     if cache:
         cache.remember(path, **hashes)
     return hashes
 
 
+HASH_FIELDS = ("md5", "sha1", "sha1_overall", "serial", "identity")
+
+
 def _dat_hashes(hashes):
-    return {key: hashes[key] for key in ("md5", "sha1") if key in hashes}
+    return {key: value for key, value in hashes.items() if key not in ("identity", "serial")}
+
+
+def _miss_reason(path, hashes):
+    """Why a game matched no DAT entry, for the run report."""
+    if path.suffix.lower() in UNMATCHABLE_SUFFIXES:
+        return "compressed image, and its serial and name aren't in the DATs"
+    if "md5" not in hashes:
+        return "too big to check, and its serial and name aren't in the DATs"
+    return "not in the DATs: renamed, patched, a hack or homebrew"
 
 
 def _priority_key(path, rom_root):
@@ -123,21 +152,75 @@ def _remove_emptied_folders(folders, top):
             folder = folder.parent
 
 
+def repair_playlists(rom_root, logger, dry_run=False):
+    """
+    Drops dead entries from the playlists the app made (ones listing files in
+    MULTI_FILE_DIR), such as entries left behind when discs moved. Playlists
+    you wrote yourself are left alone. Returns how many were repaired.
+    """
+    rom_root = Path(rom_root)
+    repaired = 0
+
+    for playlist in sorted(rom_root.glob("*/*.m3u")):
+        if not playlist.is_file() or playlist.parent.name.startswith("."):
+            continue
+        entries = read_m3u(playlist)
+        if not any(MULTI_FILE_DIR in Path(entry).parts for entry in entries):
+            continue
+        working = [entry for entry in entries if (playlist.parent / entry).is_file()]
+        if working == entries or not working:
+            continue
+
+        repaired += 1
+        dead = len(entries) - len(working)
+        if dry_run:
+            logger(f"[DRY RUN] {playlist}: would drop {dead} entries that lead nowhere")
+        else:
+            write_m3u(playlist, working)
+            logger(f"[PLAYLIST] {playlist}: dropped {dead} entries that led nowhere")
+
+    return repaired
+
+
 def _write_playlist(playlist_dir, title, entries, logger, dry_run):
+    """
+    Writes the game's playlist. Entries of an existing one that still lead to
+    a file (say, discs organised on an earlier run) are kept; ones that
+    don't, like discs that have just moved, are dropped. Discs go in order.
+    """
+    playlist = playlist_dir / f"{title}.m3u"
+    new_targets = {os.path.normpath(playlist_dir / entry) for entry in entries}
+    kept = [
+        entry
+        for entry in read_m3u(playlist)
+        if (playlist_dir / entry).is_file() and os.path.normpath(playlist_dir / entry) not in new_targets
+    ]
+    combined = sorted(kept + entries, key=lambda entry: get_disc_number(Path(entry).stem) or 0)
+
     if dry_run:
-        logger(f"[DRY RUN] {playlist_dir / (title + '.m3u')} lists: {', '.join(entries)}")
+        logger(f"[DRY RUN] {playlist} lists: {', '.join(combined)}")
         return
 
     # In the shared layout the system folder may not exist yet
     playlist_dir.mkdir(parents=True, exist_ok=True)
-    for entry in entries:
-        append_to_m3u(playlist_dir, title, entry)
+    write_m3u(playlist, combined)
+
+
+def _replaceable_playlist(playlist, unit):
+    """
+    Whether an existing playlist can be rewritten for this game: every entry
+    names one of the game's own files (a playlist you made for it). A
+    playlist listing anything else is never touched.
+    """
+    names = {f.name.lower() for f in unit}
+    return all(Path(entry).name.lower() in names for entry in read_m3u(playlist))
 
 
 def _place(unit, dest_dir, logger, status, dry_run, planned, playlist=None, cache=None):
     """
     Move a ROM and the files that belong with it into dest_dir, never
-    overwriting. playlist is a new .m3u that must not exist yet either.
+    overwriting. playlist is the game's .m3u; it may already exist only if it
+    lists nothing but this game (see _replaceable_playlist).
     """
     destinations = [dest_dir / f.name for f in unit]
 
@@ -148,9 +231,11 @@ def _place(unit, dest_dir, logger, status, dry_run, planned, playlist=None, cach
         _bump(status, "roms_processed")
         return True
 
-    clash = next(
-        (d for d in destinations + [playlist] if d and (d.exists() or d in planned)), None
-    )
+    clash = next((d for d in destinations if d.exists() or d in planned), None)
+    if clash is None and playlist and (
+        playlist in planned or (playlist.exists() and not _replaceable_playlist(playlist, unit))
+    ):
+        clash = playlist
     if clash is None and dest_dir.exists() and not dest_dir.is_dir():
         clash = dest_dir
 
@@ -173,6 +258,50 @@ def _place(unit, dest_dir, logger, status, dry_run, planned, playlist=None, cach
             if cache:
                 cache.moved(source, destination)
             logger(f"[MOVED] {source} -> {destination}")
+
+    _bump(status, "roms_processed")
+    return True
+
+
+def _place_sheet_hiding_tracks(sheet, tracks, rom_root, system, logger, status, dry_run, planned, cache, emptied):
+    """
+    For systems whose Steam parser can't launch a playlist: the .cue or .gdi
+    stays in the system folder and its tracks move into MULTI_FILE_DIR, with
+    the sheet pointed at them, so ES-DE and Steam each list one file.
+    """
+    sheet_dest = rom_root / system / sheet.name
+    track_dir = rom_root / MULTI_FILE_DIR / system / sheet.stem
+    moves = [(track, track_dir / track.name) for track in tracks if track.parent != track_dir]
+    if sheet != sheet_dest:
+        moves.append((sheet, sheet_dest))
+
+    if not moves:
+        logger(f"[IN PLACE] {sheet}")
+        _bump(status, "roms_processed")
+        return True
+
+    clash = next((dest for _, dest in moves if dest.exists() or dest in planned), None)
+    if clash is not None:
+        logger(f"[SKIP] {clash} already exists, leaving {sheet} in place")
+        _bump(status, "skipped")
+        _remember(cache, sheet, outcome="skipped")
+        return False
+
+    planned.update(dest for _, dest in moves)
+    for source, dest in moves:
+        if dry_run:
+            logger(f"[DRY RUN] {source} -> {dest}")
+            continue
+        dest.parent.mkdir(parents=True, exist_ok=True)
+        shutil.move(str(source), str(dest))
+        if cache:
+            cache.moved(source, dest)
+        emptied.add(source.parent)
+        logger(f"[MOVED] {source} -> {dest}")
+
+    if not dry_run:
+        rewrite_sheet(sheet_dest, {track.name: track_dir / track.name for track in tracks})
+        logger(f"[SHEET] {sheet_dest} now points at its tracks in {track_dir}")
 
     _bump(status, "roms_processed")
     return True
@@ -274,15 +403,28 @@ def process_roms(
         seen_hashes.add(identity)
 
         dat_name, dat_system, dat_title = lookup_hashes(_dat_hashes(hashes))
+        matched_by = "checksum" if dat_name else None
+
         # A game dropped into a system folder that takes its file type stays that system's
         chosen = _system_folder(file, rom_root)
-        if chosen and _accepts(chosen, file.suffix.lower()):
-            system = chosen
-            if dat_system and dat_system != chosen:
-                # The match is for another system: its name and thumbnails don't apply
-                dat_name = dat_title = None
-        else:
-            system = dat_system or detect_system(file, allow_guess=False)
+        if chosen and not _accepts(chosen, file.suffix.lower()):
+            chosen = None
+        if chosen and dat_system and canonical_system(dat_system) != canonical_system(chosen):
+            # The match is for another system: its name and thumbnails don't apply
+            dat_name = dat_system = dat_title = matched_by = None
+
+        family = chosen and canonical_system(chosen)
+        if not dat_name and "serial" in hashes:
+            # A disc's serial, read from its header, works for compressed images too
+            dat_name, dat_system, dat_title = lookup_serial(hashes["serial"], family)
+            matched_by = "serial" if dat_name else None
+
+        if not dat_name:
+            # Compressed, too big to read, renamed or re-dumped: try its name instead
+            dat_name, dat_system, dat_title = lookup_name(file.stem, family)
+            matched_by = "name" if dat_name else None
+
+        system = chosen or dat_system or detect_system(file, allow_guess=False)
 
         if not system:
             logger(
@@ -294,15 +436,24 @@ def process_roms(
             _remember(cache, file, outcome="unsorted")
             continue
 
-        if dat_name:
+        if matched_by == "checksum":
             _bump(status, "dat_matches")
+        elif matched_by == "serial":
+            _bump(status, "serial_matches")
+        elif matched_by == "name":
+            _bump(status, "name_matches")
+        else:
+            misses = status.setdefault("dat_misses", {})
+            reason = _miss_reason(hashed, hashes)
+            misses[reason] = misses.get(reason, 0) + 1
 
         unit = [file] + tracks
         disc = get_disc_number(file.stem) or (dat_name and get_disc_number(dat_name))
 
         game = {
             "system": system,
-            "title": file.stem if system in ARCADE_SYSTEMS else dat_name or clean_name(file.stem),
+            # Arcade zips keep their short names ("sf2"); a DAT match gives the real title
+            "title": clean_name(dat_name or file.stem) if system in ARCADE_SYSTEMS else dat_name or clean_name(file.stem),
             "names": [dat_name or file.stem],
             "dat_title": dat_title,
         }
@@ -322,6 +473,14 @@ def process_roms(
         elif tracks and layout == "esde":
             dest_dir = rom_root / system / file.name
             launch_path = dest_dir
+        elif tracks and system not in ARCADE_SYSTEMS:
+            # Steam can't launch a playlist for this system: hide the tracks instead
+            if _place_sheet_hiding_tracks(
+                file, tracks, rom_root, system, logger, status, dry_run, planned, cache, emptied
+            ):
+                placed.append({**game, "path": rom_root / system / file.name})
+                _organised(cache, rom_root / system / file.name, game, dry_run, emptied, file)
+            continue
         else:
             dest_dir = rom_root / system
             launch_path = dest_dir / file.name
@@ -345,7 +504,13 @@ def process_roms(
         else:
             # The system's Steam parser can't launch playlists: one entry per disc
             for _, unit, game in discs:
-                if _place(unit, rom_root / system, logger, status, dry_run, planned, cache=cache):
+                if len(unit) > 1:
+                    placed_disc = _place_sheet_hiding_tracks(
+                        unit[0], unit[1:], rom_root, system, logger, status, dry_run, planned, cache, emptied
+                    )
+                else:
+                    placed_disc = _place(unit, rom_root / system, logger, status, dry_run, planned, cache=cache)
+                if placed_disc:
                     placed.append({**game, "path": rom_root / system / unit[0].name})
                     _organised(cache, rom_root / system / unit[0].name, game, dry_run, emptied, unit[0])
             continue
@@ -396,8 +561,12 @@ def _place_ps3_folder(folder, rom_root, logger, status, dry_run, planned, cache,
     never hashed, and named from its PARAM.SFO, since the folder is often
     just a title ID like "BLUS30001".
     """
-    title = ps3_title(folder) or clean_name(folder.stem)
-    game = {"system": "ps3", "title": title, "names": [title], "dat_title": None,
+    serial = ps3_serial(folder)
+    dat_name, _, dat_title = lookup_serial(serial, "ps3") if serial else (None, None, None)
+    if dat_name:
+        _bump(status, "serial_matches")
+    title = clean_name(dat_name) if dat_name else ps3_title(folder) or clean_name(folder.stem)
+    game = {"system": "ps3", "title": title, "names": [dat_name or title], "dat_title": dat_title,
             "identity": f"folder:{folder.name}"}
     dest_dir = rom_root / "ps3"
 

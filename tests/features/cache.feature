@@ -52,3 +52,10 @@ Feature: Remembering what's known about files in the ROM folder
     Given a cached file "Game.sfc" with checksum "abc"
     When an unknown file is moved
     Then the cache should hold only "Game.sfc"
+
+  Scenario: Forgetting a folder forgets only what's inside it
+    Given a cached file "snes/Game.sfc" with checksum "abc"
+    And a cached file "snes-old/Other.sfc" with checksum "def"
+    When everything under "snes" is forgotten
+    Then 1 entry should have been forgotten
+    And the cache should hold only "snes-old/Other.sfc"

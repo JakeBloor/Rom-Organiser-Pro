@@ -20,7 +20,9 @@ The New games panel remembers why a game was left in place until the file change
 
 - **The first start has to download the DAT files.** Check the startup log for a libretro download error.
 - **Hacks, translations, homebrew and bad dumps aren't in the DATs.** They're still organised by extension and folder name, but artwork lookups use the file name, so matches are less likely.
-- **For more coverage,** add the latest No-Intro or Redump DATs by hand. See [Where the DAT files come from](detection.md#where-the-dat-files-come-from).
+- **For more coverage,** add the latest No-Intro or Redump DATs, TOSEC DATs for computers, or a MAME DAT. See [Where the DAT files come from](detection.md#where-the-dat-files-come-from).
+- **The run report's DAT matches chart** shows why games didn't match. "Compressed image" games are named differently from the DATs and have no readable serial: rename them to their No-Intro or Redump names, or use uncompressed images.
+- **Games organised before this update** aren't checked again. Turn on **Re-organise everything** for one run.
 
 ## Settings don't seem to apply
 

@@ -56,3 +56,13 @@ Feature: Game data and artwork
     Then Skyscraper should have been stopped
     And scraping should report it can't run
     And the scraping log should mention "Scraping snes was stopped"
+
+  Scenario Outline: ES-DE's other folder names scrape as the system they stand for
+    When the Skyscraper commands are built for "<folder>"
+    Then the gather command should scrape platform "<platform>"
+
+    Examples:
+      | folder    | platform  |
+      | megadrive | megadrive |
+      | sfc       | snes      |
+      | tg16      | pcengine  |

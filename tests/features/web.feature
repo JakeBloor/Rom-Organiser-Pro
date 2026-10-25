@@ -310,3 +310,23 @@ Feature: Organising from the web page
     Given an organise run is going
     When a stop is requested through the API
     Then the run should be asked to stop
+
+  Scenario: Re-organising everything works through games already organised
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "gb/Tetris (World).gb"
+    And scraping and cover downloads are stubbed
+    And the ROM folder has been organised through the API
+    When everything in the ROM folder is re-organised through the API
+    And the run finishes
+    Then the status should show 2 games organised
+    And the status log should mention "Re-organise everything: forgot what was known about 2 files"
+
+  Scenario: Previewing a re-organise keeps what's been organised
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "gb/Tetris (World).gb"
+    And scraping and cover downloads are stubbed
+    And the ROM folder has been organised through the API
+    When everything in the ROM folder is re-organised in a dry run through the API
+    And the run finishes
+    And the ROM folder is checked for new games through the API
+    Then the status should show 2 games organised
+    And the status log should mention "Re-organise everything (preview)"
+    And the check should say everything is organised

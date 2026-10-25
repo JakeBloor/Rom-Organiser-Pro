@@ -7,8 +7,9 @@ import os
 from collections import Counter
 from pathlib import Path
 
-from config import AMBIGUOUS_EXTENSIONS, DAT_SYSTEM_IDS, SYSTEM_MAP, SYSTEM_ROM_TYPES
+from config import AMBIGUOUS_EXTENSIONS, DAT_SYSTEM_IDS, SYSTEM_MAP, SYSTEM_ROM_TYPES, canonical_system
 from modules.archives import is_ps3_folder, sheet_tracks
+from modules.dat_validation import ARCADE_FAMILY
 from modules.detection import get_disc_number
 from modules.organizer import SHEET_SUFFIXES, is_rom_candidate, stores_multi_file_games_apart
 
@@ -96,8 +97,9 @@ def pending_games(rom_root, cache=None):
 
     - games in a system folder that the cache hasn't recorded as organised,
       or that have changed since (without a cache, every game)
-    - multi-file games in a system folder that the current layout stores
-      differently: a .cue/.gdi with its tracks, or a disc of a multi-disc game
+    - a .cue/.gdi whose track files sit next to it, which ES-DE and Steam
+      would list as extra games
+    - a disc of a multi-disc game the current layout stores behind a playlist
     - every ROM outside the system folders (loose, or in a folder of its own)
     - PS3 game folders the cache hasn't recorded as organised, wherever they are
 
@@ -132,11 +134,13 @@ def pending_games(rom_root, cache=None):
             if path in owned:
                 continue
             tracks = sheets.get(path, [])
-            multi_file = bool(tracks or get_disc_number(path.stem))
+            # Track files ES-DE and Steam would list next to their sheet
+            loose_tracks = any(track.parent == here for track in tracks)
             if (
                 folder_system is None
                 or not _organised(path, cache)
-                or (multi_file and stores_multi_file_games_apart(folder_system))
+                or (loose_tracks and canonical_system(folder_system) not in ARCADE_FAMILY)
+                or (get_disc_number(path.stem) and stores_multi_file_games_apart(folder_system))
             ):
                 pending[path] = tracks
 

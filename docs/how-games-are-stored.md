@@ -44,7 +44,29 @@ The playlist holds relative paths such as `../.multifile/psx/Final Fantasy VII (
 
 A single disc with a cue sheet is stored the same way: a one-line playlist, with the `.cue` and its tracks in `.multifile`.
 
-The shared layout is only used for systems whose EmuDeck Steam ROM Manager parser accepts `.m3u` files: Amiga (all models), C16, C64, Dreamcast, GameCube, PC-FX, PlayStation, Saturn, Sega CD, VIC-20, Wii and X68000. Multi-file games for other systems stay in the system folder. A multi-disc game then gets one entry per disc, because those systems' Steam parsers can't launch a playlist.
+Playlists are only used for systems whose EmuDeck Steam ROM Manager parser accepts `.m3u` files: Amiga (all models), C16, C64, Dreamcast, GameCube, PC-FX, PlayStation, Saturn, Sega CD, VIC-20, Wii and X68000.
+
+For other CD systems, such as PC Engine CD and 3DO, the `.cue` or `.gdi` stays in the system folder. Its track files move into `.multifile`, and the sheet is rewritten to point at them:
+
+```
+roms/3do/Gex (USA).cue                          ← the only file ES-DE and Steam see
+roms/.multifile/3do/Gex (USA)/Gex (USA) (Track 1).bin
+roms/.multifile/3do/Gex (USA)/Gex (USA) (Track 2).bin
+```
+
+A multi-disc game for these systems gets one entry per disc, because their Steam parsers can't launch a playlist.
+
+### Playlists you already have
+
+If a game already has a playlist with its name, for example one you made, the app replaces it, but only if every entry is one of that game's own files. A playlist that lists anything else is never touched, and the game is skipped instead.
+
+When discs are added to a game that already has a playlist, the playlist is rebuilt: entries that still work are kept, entries for discs that just moved are replaced, and the discs are put in order.
+
+Every real run in the ROM folder also checks the playlists the app made, the ones with entries in `.multifile`, and drops entries that lead nowhere. That repairs playlists earlier versions of the app added to without removing the old entries.
+
+### Track names in sheets
+
+A `.cue` often names its tracks with different capitals from the real files, for example `crash bandicoot (usa).bin` for `Crash Bandicoot (USA).bin`. The Deck's file system treats those as different names, so the app matches track names ignoring capitals. Then the sheet and its tracks are kept together.
 
 ### ES-DE layout
 

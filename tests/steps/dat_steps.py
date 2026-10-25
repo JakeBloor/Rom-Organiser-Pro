@@ -318,8 +318,11 @@ def no_staging_left(dat_context):
 @then("only the libretro archive should be requested")
 def only_libretro_requested(dat_context):
     assert dat_context["result"] == {"libretro": False}
-    assert len(dat_context["downloads"]) == 1
-    assert "libretro-database" in dat_context["downloads"][0]
+    # Only the free GitHub sources: one libretro archive, and FinalBurn Neo's DATs
+    libretro = [url for url in dat_context["downloads"] if "libretro-database" in url]
+    assert len(libretro) == 1
+    assert all(url.startswith(("https://github.com/", "https://raw.githubusercontent.com/"))
+               for url in dat_context["downloads"])
 
 
 @then("the log should explain where to put manually downloaded DATs")
@@ -347,3 +350,131 @@ def libretro_fetch_failed(dat_context):
 @then("the existing libretro DATs should be kept")
 def existing_libretro_dats_kept(dat_context):
     assert (dat_context["dat_dir"] / "libretro" / "dat" / "Existing.dat").exists()
+
+
+@given(parsers.parse('a clrmamepro DAT "{relative_path}" with no games'))
+def clrmamepro_dat_without_games(dat_context, relative_path):
+    write_dat(dat_context, relative_path, 'clrmamepro (\n\tname "Stub"\n)\n')
+
+
+@then(parsers.parse('the name "{name}" should be found for "{system}"'))
+def name_found_for(name, system):
+    from modules.dat_validation import lookup_name, name_key
+
+    found, found_system, _ = lookup_name(name, system)
+    assert name_key(found) == name_key(name)
+    assert found_system == system
+
+
+@then(parsers.parse('the name "{name}" should not be found for "{system}"'))
+def name_not_found_for(name, system):
+    from modules.dat_validation import lookup_name
+
+    assert lookup_name(name, system) == (None, None, None)
+
+
+@then(parsers.parse('the name "{name}" should not be found without a system'))
+def name_not_found_alone(name):
+    from modules.dat_validation import lookup_name
+
+    assert lookup_name(name) == (None, None, None)
+
+
+@then(parsers.parse('the name "{name}" should be found without a system as "{found}"'))
+def name_found_alone(name, found):
+    from modules.dat_validation import lookup_name
+
+    assert lookup_name(name)[0] == found
+
+
+@given(parsers.parse('an XML DAT "{relative_path}" listing the games "{names}"'))
+def xml_dat_games(dat_context, relative_path, names):
+    games = "".join(
+        f'<game name="{name}"><rom name="{name}.iso" md5="{index:032x}" /></game>'
+        for index, name in enumerate(names.split(" | "), start=1)
+    )
+    write_dat(dat_context, relative_path, f'<?xml version="1.0"?>\n<datafile>{games}</datafile>\n')
+
+
+@then(parsers.parse('the name "{name}" should be found for "{system}" as "{found}"'))
+def name_found_for_as(name, system, found):
+    from modules.dat_validation import lookup_name
+
+    assert lookup_name(name, system)[0] == found
+
+
+class FakeDownload:
+    def __init__(self, content):
+        self.content = content
+
+    def raise_for_status(self):
+        pass
+
+
+@given("FinalBurn Neo's DATs can be downloaded")
+def fbneo_downloadable(dat_context, monkeypatch):
+    def fake_get(url, **kwargs):
+        dat_context["downloads"].append(url)
+        return FakeDownload(f"<datafile><!-- {url} --></datafile>".encode())
+
+    monkeypatch.setattr("modules.dat_fetcher.requests.get", fake_get)
+
+
+@given("FinalBurn Neo's DATs for the pinned commit are on disk")
+def fbneo_on_disk(dat_context):
+    folder = dat_context["dat_dir"] / "fbneo"
+    folder.mkdir(parents=True)
+    for name in DATFetcher.FBNEO_DATS:
+        (folder / name).write_text("<datafile />")
+    (folder / ".commit").write_text(DATFetcher.DEFAULT_FBNEO_COMMIT)
+
+
+@when("FinalBurn Neo's DATs are fetched")
+def fbneo_fetched(dat_context):
+    dat_context["result"] = DATFetcher(quiet_logger).fetch_fbneo_dats()
+
+
+@then(parsers.parse("FinalBurn Neo's fetch should report {outcome}"))
+def fbneo_result(dat_context, outcome):
+    assert dat_context["result"] is (outcome == "success")
+
+
+@then("FinalBurn Neo's DATs should be on disk")
+def fbneo_files_on_disk(dat_context):
+    folder = dat_context["dat_dir"] / "fbneo"
+    assert sorted(p.name for p in folder.glob("*.dat")) == sorted(DATFetcher.FBNEO_DATS)
+    assert (folder / ".commit").read_text() == DATFetcher.DEFAULT_FBNEO_COMMIT
+    assert not (dat_context["dat_dir"] / "fbneo.partial").exists()
+
+
+@given(parsers.parse('FinalBurn Neo\'s "{kind}" DAT lists "{zip_name}" as "{description}"'))
+def fbneo_dat(dat_context, kind, zip_name, description):
+    name = f"FinalBurn Neo (ClrMame Pro XML, {kind}).dat"
+    write_dat(
+        dat_context,
+        f"fbneo/{name}",
+        f'<?xml version="1.0"?><datafile><game name="{zip_name}"><description>{description}</description>'
+        f'<rom name="{zip_name}.bin" crc="12345678" /></game></datafile>',
+    )
+
+
+@given(parsers.parse('an extra DAT "{name}" whose {element} "{game}" has MD5 "{md5}"'))
+def extra_dat(dat_context, name, element, game, md5):
+    write_dat(
+        dat_context,
+        f"extra/{name}",
+        f'<?xml version="1.0"?><datafile><{element} name="{game}"><description>{game} (Full Title)</description>'
+        f'<rom name="{game}.bin" md5="{md5}" /></{element}></datafile>',
+    )
+
+
+@then(parsers.parse('the name "{name}" should be found for "{system}" as "{found}" in "{dat_title}"'))
+def name_found_with_title(name, system, found, dat_title):
+    from modules.dat_validation import lookup_name
+
+    assert lookup_name(name, system) == (found, system, dat_title)
+
+
+@then(parsers.parse('MD5 "{md5}" should be "{name}" for "{system}" with no thumbnail folder'))
+def md5_without_thumbnails(md5, name, system):
+    assert DAT_DB[md5] == (name, system, None)

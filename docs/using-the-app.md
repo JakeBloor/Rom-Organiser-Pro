@@ -39,6 +39,8 @@ Only games in the system folders count, because that's all ES-DE shows. Games yo
 
 Only one run can go at a time. The form locks while a run is going.
 
+Turn on **Re-organise everything** to forget what the app has organised and work through the whole ROM folder again. Every game is checked against the DATs and for duplicates, and given any missing artwork. Games already in place aren't moved. It's useful after the DATs update, or after changing settings. With **Dry run** on, it previews this without forgetting anything.
+
 ### New games
 
 Drop new games into their system folder, such as `roms/snes/`. Games dropped loose in the ROM folder, or in a folder of their own, work too. The **New games** panel shows:
@@ -88,6 +90,7 @@ When a run finishes, the run report shows:
 
 - **What happened to each file:** organised, unsorted, skipped (the destination already existed) or duplicate (the same ROM appeared twice).
 - **Games organised by system.**
+- **DAT matches:** how many games matched by checksum or by name, and why the rest matched nothing. See [Matching by name](detection.md#matching-by-name).
 - **ES-DE and Steam image coverage** for the games this run organised. A dry run says that images are only downloaded on a real run.
 - **Files left where you dropped them,** with what to do about them.
 

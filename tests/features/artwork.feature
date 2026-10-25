@@ -81,3 +81,9 @@ Feature: Downloading images for ES-DE and Steam
     Given connections are counted
     When two images are requested on this thread
     Then 1 connection should have been opened
+
+  Scenario: Games in an alternative folder get the libretro thumbnails of the system it stands for
+    Given libretro has "Named_Boxarts" for "Sonic the Hedgehog 2 (World)" in "Sega - Mega Drive - Genesis"
+    And SteamGridDB is disabled
+    When artwork is fetched for "megadrive/Sonic the Hedgehog 2 (World).md" named "Sonic the Hedgehog 2 (World)"
+    Then the saved media should be "covers"

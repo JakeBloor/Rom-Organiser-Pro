@@ -77,6 +77,7 @@ Feature: Counting the games in a ROM library and finding new ones
       | psx/Crash Bandicoot (USA).cue            | psx/Crash Bandicoot (USA).bin  |
       | psx/Final Fantasy VII (USA) (Disc 1).chd |                                |
       | psx/More/Tomba (USA) (Disc 2).chd        |                                |
+      | pcenginecd/Ys Book I & II (USA).cue      | pcenginecd/Ys Book I & II (USA).bin |
 
   Scenario: A game dropped into its system folder is new until it's organised, and again if it changes
     Given a ROM library containing

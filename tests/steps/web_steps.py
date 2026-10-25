@@ -751,3 +751,32 @@ def run_asked_to_stop(web_context):
     assert web_context["stop"].status_code == 202
     assert rom_app.status["cancel_requested"] is True
     rom_app.status["cancel_requested"] = False
+
+
+@given("the ROM folder has been organised through the API")
+def rom_folder_already_organised(client, web_context):
+    organise_rom_folder_through_api(client, web_context)
+    run_finishes(client, web_context)
+
+
+def reorganise(client, web_context, dry_run):
+    response = client.post(
+        "/api/organise",
+        json={"rom_root": str(web_context["rom_root"]), "dry_run": dry_run, "force": True},
+    )
+    assert response.status_code == 202
+
+
+@when("everything in the ROM folder is re-organised through the API")
+def reorganise_through_api(client, web_context):
+    reorganise(client, web_context, dry_run=False)
+
+
+@when("everything in the ROM folder is re-organised in a dry run through the API")
+def reorganise_dry_run_through_api(client, web_context):
+    reorganise(client, web_context, dry_run=True)
+
+
+@then(parsers.parse("the status should show {count:d} games organised"))
+def status_shows_organised(web_context, count):
+    assert web_context["status"]["roms_processed"] == count

@@ -81,6 +81,15 @@ class FileCache:
             if entry is not None:
                 self.entries[_key(destination)] = entry
 
+    def forget_under(self, folder):
+        """Forgets every file in folder, so all of it is checked again. Returns how many."""
+        prefix = os.path.join(_key(folder), "")
+        with self.lock:
+            forgotten = [key for key in self.entries if key.startswith(prefix)]
+            for key in forgotten:
+                del self.entries[key]
+            return len(forgotten)
+
     def library_hashes(self):
         """{identity: path} for the games the app has organised that are still where it put them."""
         with self.lock:

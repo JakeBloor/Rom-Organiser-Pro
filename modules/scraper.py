@@ -3,8 +3,14 @@ import subprocess
 from collections import deque
 from pathlib import Path
 
-from config import SKYSCRAPER_PLATFORMS
+from config import SKYSCRAPER_PLATFORMS, canonical_system
 from modules import esde, settings
+
+
+def _platform(system):
+    """Skyscraper's name for a system, also for ES-DE's other folder names."""
+    canonical = canonical_system(system)
+    return SKYSCRAPER_PLATFORMS.get(system) or SKYSCRAPER_PLATFORMS.get(canonical, canonical)
 
 
 def skyscraper_commands(system, rom_root, skyscraper="Skyscraper"):
@@ -15,7 +21,7 @@ def skyscraper_commands(system, rom_root, skyscraper="Skyscraper"):
     """
     base = [
         skyscraper,
-        "-p", SKYSCRAPER_PLATFORMS.get(system, system),
+        "-p", _platform(system),
         "-i", str(Path(rom_root) / system),
     ]
 

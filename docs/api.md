@@ -20,6 +20,7 @@ Starts an organise run in the background. By default it organises the new games 
 | `rom_root` | no | Defaults to ES-DE's ROM folder. |
 | `input_path` | no | Organise a separate folder of new ROMs into `rom_root` instead. Every ROM in it is moved. |
 | `dry_run` | no | Defaults to `true`. Send `false` to move files and download artwork. |
+| `force` | no | `true` re-organises every game in the ROM folder, not just new ones. A real run forgets what the cache knew about the folder; a dry run only previews this. |
 
 | Status | Meaning |
 |---|---|
@@ -64,7 +65,8 @@ The live state of the current or last run. The page asks for this every second.
 | `cancel_requested` | `true` once a stop has been asked for. |
 | `dry_run` | Whether this is a dry run. |
 | `progress`, `files_total`, `files_checked`, `current_file` | Progress within the current phase. |
-| `roms_processed`, `dat_matches`, `duplicates`, `unsorted`, `skipped`, `artwork_downloads` | Counters. |
+| `roms_processed`, `dat_matches`, `name_matches`, `duplicates`, `unsorted`, `skipped`, `artwork_downloads` | Counters. `dat_matches` counts checksum matches, `serial_matches` serial matches and `name_matches` name matches. |
+| `dat_misses` | Games that matched no DAT entry, by reason: `{reason: count}`. |
 | `media_downloads` | Images saved this run, by type, such as `{"covers": 3, "steam_tall": 3}`. |
 | `unsorted_files` | Paths of the files left in place, relative to the folder being organised. |
 | `report` | The run report once the run finishes, otherwise `null` (see below). |
@@ -78,6 +80,8 @@ The `report` object:
   "finished": "2026-10-25T14:03:11",
   "outcomes": {"Organised": 8, "Unsorted": 1, "Skipped": 0, "Duplicates": 1},
   "dat_matches": 6,
+  "name_matches": 1,
+  "dat_misses": {"compressed image, and its name isn't in the DATs": 1},
   "by_system": {"psx": 3, "snes": 2},
   "unsorted_files": ["Mystery Disc.iso"],
   "media": { "total": 8, "by_type": {"covers": 8}, "by_system": {} }

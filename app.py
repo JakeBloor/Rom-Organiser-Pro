@@ -14,7 +14,7 @@ from modules.cache import LEFT_IN_PLACE, FileCache
 from modules.library import list_library, pending_games, system_folders
 from modules.media import media_coverage, steam_artwork_root
 from modules.srm import configure_srm
-from modules.organizer import process_roms, sort_by_priority
+from modules.organizer import process_roms, repair_playlists, sort_by_priority
 from modules.scraper import run_skyscraper
 from modules.logging_utils import AppLogger
 from modules.dat_validation import fetch_latest_dats, load_dat_files
@@ -31,6 +31,8 @@ STATUS_COUNTERS = (
     "roms_processed",
     "duplicates",
     "dat_matches",
+    "serial_matches",
+    "name_matches",
     "artwork_downloads",
     "unsorted",
     "skipped",
@@ -56,6 +58,8 @@ status = {
     # Images saved this run, per media type ("covers", "steam_tall", ...)
     "media_downloads": {},
     "unsorted_files": [],
+    # Games that matched no DAT entry, by why: {reason: count}
+    "dat_misses": {},
     # Summary shown on the page once a run finishes
     "report": None,
 }
@@ -144,6 +148,10 @@ def build_report(placed, dry_run):
             "Duplicates": status["duplicates"],
         },
         "dat_matches": status["dat_matches"],
+        "serial_matches": status["serial_matches"],
+        "name_matches": status["name_matches"],
+        # Why the rest matched nothing: {reason: games}
+        "dat_misses": dict(status["dat_misses"]),
         "by_system": dict(Counter(game["system"] for game in placed).most_common()),
         "unsorted_files": list(status["unsorted_files"]),
         "media": None
@@ -346,19 +354,33 @@ def _download_artwork(games):
                 break
 
 
-def run_organise(input_path, rom_root, dry_run):
-    """Organise, then scrape game data and download covers. Runs in a worker thread."""
+def run_organise(input_path, rom_root, dry_run, force=False):
+    """
+    Organise, then scrape game data and download covers. Runs in a worker
+    thread. With force, the cache is ignored and every game in the ROM folder
+    is organised again: a real run forgets what it knew, a dry run only
+    previews that.
+    """
     try:
         _progress(phase="finding", current_detail="looking for new games")
+        cache = file_cache
         # Organising the ROM folder itself only touches what still needs it
         files = None
         if Path(input_path).resolve() == Path(rom_root).resolve():
+            if force and dry_run:
+                cache = None
+                app_logger.info("Re-organise everything (preview): every game is checked again")
+            elif force:
+                forgotten = file_cache.forget_under(rom_root)
+                app_logger.info(f"Re-organise everything: forgot what was known about {forgotten} files")
             files = [
                 file
-                for game, tracks in pending_games(rom_root, file_cache).items()
+                for game, tracks in pending_games(rom_root, cache).items()
                 for file in [game, *tracks]
             ]
         _progress(phase="organising", current_detail="")
+        if files is not None:
+            repair_playlists(rom_root, app_logger.log, dry_run)
         placed = process_roms(
             input_path,
             app_logger.log,
@@ -366,7 +388,7 @@ def run_organise(input_path, rom_root, dry_run):
             dry_run=dry_run,
             rom_root=rom_root,
             files=files,
-            cache=file_cache,
+            cache=cache,
         )
 
         if dry_run:
@@ -421,6 +443,8 @@ def start_organise():
     # Without an import folder, new games dropped into the ROM folder are organised
     input_path = str(body.get("input_path", "")).strip() or rom_root
     dry_run = bool(body.get("dry_run", True))
+    # Forget what's been organised and work through the whole ROM folder again
+    force = bool(body.get("force", False))
 
     if not Path(rom_root).is_dir():
         return jsonify({"error": f"ROM folder not found: {rom_root}"}), 400
@@ -446,6 +470,7 @@ def start_organise():
         cancel_requested=False,
         media_downloads={},
         unsorted_files=[],
+        dat_misses={},
         report=None,
         **{counter: 0 for counter in STATUS_COUNTERS},
     )
@@ -456,7 +481,7 @@ def start_organise():
         app_logger.info(f"{action}: {input_path} -> {rom_root}")
 
     threading.Thread(
-        target=run_organise, args=(input_path, rom_root, dry_run), daemon=True
+        target=run_organise, args=(input_path, rom_root, dry_run, force), daemon=True
     ).start()
 
     return jsonify({"started": True}), 202

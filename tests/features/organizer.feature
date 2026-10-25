@@ -52,12 +52,14 @@ Feature: ROM organiser
     Then the ROM folder should contain "psx/Final Fantasy VII (USA).m3u/Final Fantasy VII (USA) (Disc 1).chd"
     And the playlist "psx/Final Fantasy VII (USA).m3u/Final Fantasy VII (USA).m3u" should list "Final Fantasy VII (USA) (Disc 1).chd | Final Fantasy VII (USA) (Disc 2).chd"
 
-  Scenario: Systems whose Steam parser can't launch playlists keep their files in the system folder
+  Scenario: Systems whose Steam parser can't launch playlists keep their sheet in the system folder and hide its tracks
     Given an import folder containing "pcenginecd/Ys Book I & II (USA).cue" for track "Ys Book I & II (USA).bin"
     And the import folder also contains "pcenginecd/Dungeon Explorer II (USA) (Disc 1).chd"
     And the import folder also contains "pcenginecd/Dungeon Explorer II (USA) (Disc 2).chd"
     When the organiser runs
-    Then the system folder "pcenginecd" should only hold "Dungeon Explorer II (USA) (Disc 1).chd | Dungeon Explorer II (USA) (Disc 2).chd | Ys Book I & II (USA).bin | Ys Book I & II (USA).cue"
+    Then the system folder "pcenginecd" should only hold "Dungeon Explorer II (USA) (Disc 1).chd | Dungeon Explorer II (USA) (Disc 2).chd | Ys Book I & II (USA).cue"
+    And the ROM folder should contain ".multifile/pcenginecd/Ys Book I & II (USA)/Ys Book I & II (USA).bin"
+    And the sheet "pcenginecd/Ys Book I & II (USA).cue" should point at "../.multifile/pcenginecd/Ys Book I & II (USA)/Ys Book I & II (USA).bin"
 
   Scenario: A disc image that can't be identified is left in place
     Given an import folder containing "Mystery Game.iso"
@@ -104,7 +106,7 @@ Feature: ROM organiser
     Then the import file should still exist
     And the log should mention "[SKIP]"
 
-  Scenario: An existing playlist with the same name blocks a cue sheet
+  Scenario: An unrelated playlist with the same name blocks a cue sheet
     Given an import folder containing "psx/Crash Bandicoot (USA).cue" for track "Crash Bandicoot (USA).bin"
     And the ROM folder already contains "psx/Crash Bandicoot (USA).m3u"
     When the organiser runs
@@ -288,3 +290,158 @@ Feature: ROM organiser
     And the ROM folder is organised
     When the ROM folder is organised
     Then the cache should say "New/Journey (USA).ps3" was skipped
+
+  Scenario: A compressed game named like a DAT entry is matched by name
+    Given the DATs know "Spyro the Dragon (USA)" for "psx" in "Sony - PlayStation" by name
+    And "psx/Spyro the Dragon (USA).chd" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the status should count 1 name_matches
+    And the placed game should come from the DAT "Sony - PlayStation"
+
+  Scenario: A DVD-based CHD matches the DAT by the checksum in its header
+    Given a CHD "ps2/Gran Turismo 4 (USA).chd" whose header records SHA-1 "1111111111111111111111111111111111111111"
+    And the DATs list SHA-1 "1111111111111111111111111111111111111111" as "Gran Turismo 4 (USA)" for "ps2" in "Sony - PlayStation 2"
+    When the ROM folder is organised
+    Then the status should count 1 dat_matches
+
+  Scenario: An SNES dump with a copier header matches its headerless DAT entry
+    Given "snes/Chrono Trigger (USA).smc" is dropped into the ROM folder with a 512-byte copier header
+    And the DATs list the ROM without its header as "Chrono Trigger (USA)" for "snes" in "Nintendo - Super Nintendo Entertainment System"
+    When the ROM folder is organised
+    Then the status should count 1 dat_matches
+
+  Scenario: Games that match nothing say why
+    Given files up to 1 MB are checked against the DATs
+    And "psx/Homebrew Thing.chd" is dropped into the ROM folder
+    And a 2 MB "ps2/Unknown Disc.iso" is dropped into the ROM folder
+    And "snes/My Hack.sfc" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the DAT misses should be
+      | reason                                                 | games |
+      | compressed image, and its serial and name aren't in the DATs | 1     |
+      | too big to check, and its serial and name aren't in the DATs | 1     |
+      | not in the DATs: renamed, patched, a hack or homebrew  | 1     |
+
+  Scenario: A game in one of ES-DE's other folder names matches the DAT for that system
+    Given "megadrive/Sonic the Hedgehog (USA, Europe).md" is dropped into the ROM folder
+    And the DATs list "megadrive/Sonic the Hedgehog (USA, Europe).md" in the ROM folder as "Sonic the Hedgehog (USA, Europe)" for "genesis" in "Sega - Mega Drive - Genesis"
+    When the ROM folder is organised
+    Then the ROM folder should contain "megadrive/Sonic the Hedgehog (USA, Europe).md"
+    And the status should count 1 dat_matches
+    And the placed game should come from the DAT "Sega - Mega Drive - Genesis"
+
+  Scenario: A compressed game in an alternative folder is matched by name for the system it stands for
+    Given the DATs know "Sonic CD (USA)" for "segacd" in "Sega - Mega-CD - Sega CD" by name
+    And "megacd/Sonic CD (USA).chd" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the status should count 1 name_matches
+
+  Scenario: A compressed GameCube image is matched by the game ID in its header
+    Given the DATs know serial "GM8E01" as "Metroid Prime (USA)" for "gc" in "Nintendo - GameCube"
+    And a Wii-style image "gc/Metroid.rvz" with game ID "GM8E01" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the status should count 1 serial_matches
+    And the placed game should come from the DAT "Nintendo - GameCube"
+
+  Scenario: A GameCube game ID matches a Redump serial by its 4-character code
+    Given the DATs know serial "DL-DOL-GM8E-USA" as "Metroid Prime (USA)" for "gc" in "Nintendo - GameCube"
+    And a Wii-style image "gc/Metroid.rvz" with game ID "GM8E01" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the status should count 1 serial_matches
+
+  Scenario: A serial the DATs don't know falls back to the name
+    Given the DATs know "Metroid Prime (USA)" for "gc" in "Nintendo - GameCube" by name
+    And a Wii-style image "gc/Metroid Prime (USA).rvz" with game ID "ZZZZ01" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the status should count 1 name_matches
+
+  Scenario: A PS3 game folder is matched by the serial in its PARAM.SFO
+    Given the DATs know serial "BLUS30443" as "Demon's Souls (USA)" for "ps3" in "Sony - PlayStation 3"
+    And a PS3 disc folder "ps3/BLUS30443" with serial "BLUS30443" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the status should count 1 serial_matches
+    And the placed games should be titled "Demon's Souls"
+
+  Scenario: An arcade zip is matched by its set name and titled from the DAT
+    Given the DATs know "sf2" as "Street Fighter II - The World Warrior (World 910522)" for "arcade" in "FBNeo - Arcade Games" by zip name
+    And "arcade/sf2.zip" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the ROM folder should contain "arcade/sf2.zip"
+    And the status should count 1 name_matches
+    And the placed games should be titled "Street Fighter II - The World Warrior"
+
+  Scenario: Every game in a messy system folder ends up listed once in ES-DE and Steam
+    Given "psx/Crash Bandicoot (USA).cue" in the ROM folder points at "crash bandicoot (usa).bin"
+    And "psx/Crash Bandicoot (USA).bin" is dropped into the ROM folder
+    And "psx/Spyro (USA).cue" in the ROM folder points at "Spyro (USA).bin"
+    And "psx/Spyro (USA).bin" is dropped into the ROM folder
+    And "psx/Spyro (USA).m3u" in the ROM folder lists "Spyro (USA).cue"
+    And "psx/Final Fantasy VII (USA) (Disc 1).chd" is dropped into the ROM folder
+    And "psx/Final Fantasy VII (USA) (Disc 2).chd" is dropped into the ROM folder
+    And "psx/Final Fantasy VII (USA).m3u" in the ROM folder lists "Final Fantasy VII (USA) (Disc 1).chd | Final Fantasy VII (USA) (Disc 2).chd"
+    And "3do/Gex (USA).cue" in the ROM folder points at "Gex (USA) (Track 1).bin | Gex (USA) (Track 2).bin"
+    And "3do/Gex (USA) (Track 1).bin" is dropped into the ROM folder
+    And "3do/Gex (USA) (Track 2).bin" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the system folder "psx" should only hold "Crash Bandicoot (USA).m3u | Final Fantasy VII (USA).m3u | Spyro (USA).m3u"
+    And the system folder "3do" should only hold "Gex (USA).cue"
+    And the playlist "psx/Final Fantasy VII (USA).m3u" should list "../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd | ../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 2).chd"
+    And the playlist "psx/Spyro (USA).m3u" should list "../.multifile/psx/Spyro (USA)/Spyro (USA).cue"
+    And the sheet "3do/Gex (USA).cue" should point at "../.multifile/3do/Gex (USA)/Gex (USA) (Track 1).bin | ../.multifile/3do/Gex (USA)/Gex (USA) (Track 2).bin"
+    And no duplicates should be reported
+
+  Scenario: A disc added later joins the discs already behind the playlist
+    Given "psx/Final Fantasy VII (USA) (Disc 1).chd" is dropped into the ROM folder
+    And the ROM folder is organised
+    And "psx/Final Fantasy VII (USA) (Disc 2).chd" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the playlist "psx/Final Fantasy VII (USA).m3u" should list "../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd | ../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 2).chd"
+
+  Scenario: A CD game whose tracks are already hidden is organised where it is
+    Given "3do/Gex (USA).cue" in the ROM folder points at "../.multifile/3do/Gex (USA)/Gex (USA).bin"
+    And ".multifile/3do/Gex (USA)/Gex (USA).bin" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the log should mention "[IN PLACE]"
+    And the system folder "3do" should only hold "Gex (USA).cue"
+
+  Scenario: Hiding a CD game's tracks never overwrites a file already there
+    Given "3do/Gex (USA).cue" in the ROM folder points at "Gex (USA).bin"
+    And "3do/Gex (USA).bin" is dropped into the ROM folder
+    And the ROM folder already contains ".multifile/3do/Gex (USA)/Gex (USA).bin"
+    When the ROM folder is organised
+    Then the log should mention "[SKIP]"
+    And the ROM folder should contain "3do/Gex (USA).bin"
+
+  Scenario: A dry run shows how a CD game's tracks would be hidden
+    Given "3do/Gex (USA).cue" in the ROM folder points at "Gex (USA).bin"
+    And "3do/Gex (USA).bin" is dropped into the ROM folder
+    When the ROM folder is organised in dry-run mode
+    Then the log should mention "[DRY RUN]"
+    And the ROM folder should contain "3do/Gex (USA).bin"
+
+  Scenario: A multi-disc CD game for a system without playlists hides each disc's tracks
+    Given "New/pcenginecd/Dungeon Explorer II (USA) (Disc 1).cue" in the ROM folder points at "Dungeon Explorer II (USA) (Disc 1).bin"
+    And "New/pcenginecd/Dungeon Explorer II (USA) (Disc 1).bin" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the system folder "pcenginecd" should only hold "Dungeon Explorer II (USA) (Disc 1).cue"
+    And the ROM folder should contain ".multifile/pcenginecd/Dungeon Explorer II (USA) (Disc 1)/Dungeon Explorer II (USA) (Disc 1).bin"
+
+  Scenario: Dead entries are dropped from the app's playlists, and your own are left alone
+    Given ".multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd" is dropped into the ROM folder
+    And "psx/Final Fantasy VII (USA).m3u" in the ROM folder lists "Final Fantasy VII (USA) (Disc 1).chd | ../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd"
+    And "psx/My Mix.m3u" in the ROM folder lists "Missing Game.chd"
+    And "psx/All Gone.m3u" in the ROM folder lists "../.multifile/psx/Gone/Gone.chd"
+    And "psx/Fine.m3u" in the ROM folder lists "../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd"
+    And "psx/Legend of Dragoon (USA).m3u/Legend of Dragoon (USA).m3u" in the ROM folder lists "LoD (Disc 1).chd"
+    When the playlists are repaired
+    Then 1 playlist should have been repaired
+    And the playlist "psx/Final Fantasy VII (USA).m3u" should list "../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd"
+    And the playlist "psx/My Mix.m3u" should still read "Missing Game.chd"
+    And the playlist "psx/All Gone.m3u" should still read "../.multifile/psx/Gone/Gone.chd"
+
+  Scenario: A dry run only says which playlists it would repair
+    Given ".multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd" is dropped into the ROM folder
+    And "psx/Final Fantasy VII (USA).m3u" in the ROM folder lists "Final Fantasy VII (USA) (Disc 1).chd | ../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd"
+    When the playlists are repaired in dry-run mode
+    Then the log should mention "would drop 1 entries"
+    And the playlist "psx/Final Fantasy VII (USA).m3u" should still read "Final Fantasy VII (USA) (Disc 1).chd | ../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd"

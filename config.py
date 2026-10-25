@@ -135,7 +135,62 @@ DAT_SYSTEM_IDS = {
     "ScummVM": "scummvm",
     "PICO-8": "pico8",
     "TIC-80": "tic80",
+    # Smaller systems with No-Intro DATs
+    "Arduboy Inc - Arduboy": "arduboy",
+    "Emerson - Arcadia 2001": "arcadia",
+    "Fairchild - Channel F": "channelf",
+    "Epoch - Super Cassette Vision": "scv",
+    "Philips - Videopac+": "videopac",
+    "VTech - CreatiVision": "crvision",
+    "Tiger - Game.com": "gamecom",
+    "Watara - Supervision": "supervision",
+    "Hartung - Game Master": "gmaster",
+    "Casio - PV-1000": "pv1000",
+    "Funtech - Super Acan": "supracan",
+    "Nintendo - Sufami Turbo": "sufami",
+    "Sinclair - ZX 81": "zx81",
+    "Sharp - X1": "x1",
+    "Commodore - Plus-4": "plus4",
+    "VTech - V.Smile": "vsmile",
+    "NEC - PC-98": "pc98",
+    "Atomiswave": "atomiswave",
+    "Uzebox": "uzebox",
+    "Mobile - J2ME": "j2me",
+    "Mobile - Palm OS": "palm",
+    "WASM-4": "wasm4",
+    "LowRes NX": "lowresnx",
 }
+
+# Other names ES-DE uses for a system's folder, e.g. "megadrive" for the
+# Genesis. Games there take the same file types, match the same DATs and
+# get the same artwork as the system they stand for.
+SYSTEM_ALIASES = {
+    "famicom": "nes",
+    "sfc": "snes",
+    "megadrive": "genesis",
+    "megadrivejp": "genesis",
+    "megacd": "segacd",
+    "megacdjp": "segacd",
+    "tg16": "pcengine",
+    "tg-cd": "pcenginecd",
+    "sgb": "gb",
+    "msx1": "msx",
+    "amiga600": "amiga",
+    "amiga1200": "amiga",
+    "saturnjp": "saturn",
+    "sega32xjp": "sega32x",
+    "sega32xna": "sega32x",
+    "snesna": "snes",
+    "cps": "arcade",
+    "cps1": "arcade",
+    "cps2": "arcade",
+    "cps3": "arcade",
+}
+
+
+def canonical_system(system):
+    """The system an ES-DE folder name stands for: "megadrive" -> "genesis"."""
+    return SYSTEM_ALIASES.get(system, system)
 
 # ========= SYSTEM PRIORITY =========
 # Used for ambiguous extensions (e.g., .iso, .cue, .bin, .chd)
@@ -319,7 +374,35 @@ SYSTEM_ROM_TYPES = {
     "easyrpg": [".ldb"],
     "lutro": [".lua"],
     "solarus": [".solarus"],
+    # Smaller systems
+    "arduboy": [".hex", ".arduboy", ".zip"],
+    "arcadia": [".bin", ".zip"],
+    "channelf": [".bin", ".chf", ".zip"],
+    "scv": [".bin", ".0", ".zip"],
+    "videopac": [".bin", ".zip"],
+    "crvision": [".bin", ".rom", ".zip"],
+    "gamecom": [".bin", ".zip"],
+    "supervision": [".sv", ".bin", ".zip"],
+    "gmaster": [".bin", ".zip"],
+    "pv1000": [".bin", ".zip"],
+    "supracan": [".bin", ".zip"],
+    "sufami": [".st", ".bs", ".sfc", ".smc", ".zip"],
+    "zx81": [".p", ".t81", ".tzx", ".zip"],
+    "x1": [".2d", ".2hd", ".d88", ".88d", ".hdm", ".xdf", ".dx1", ".tap", ".zip"],
+    "plus4": [".d64", ".prg", ".t64", ".tap", ".crt", ".zip"],
+    "vsmile": [".bin", ".zip"],
+    "pc98": [".d98", ".98d", ".fdi", ".hdi", ".nfd", ".hdd", ".d88", ".88d", ".fdd", ".hdm", ".cue", ".zip"],
+    "atomiswave": [".bin", ".lst", ".zip", ".7z"],
+    "uzebox": [".uze"],
+    "j2me": [".jar"],
+    "palm": [".prc", ".pqa", ".pdb"],
+    "wasm4": [".wasm"],
+    "lowresnx": [".nx"],
 }
+
+# Alternative folder names take the file types of the system they stand for
+for _alias, _system in SYSTEM_ALIASES.items():
+    SYSTEM_ROM_TYPES.setdefault(_alias, list(SYSTEM_ROM_TYPES[_system]))
 
 # ========= SYSTEM MAP =========
 # Comprehensive EmuDeck system mapping
@@ -494,4 +577,16 @@ SYSTEM_MAP = {
     # SOLARUS
     # =====================================================
     ".solarus": "solarus",
+    # =====================================================
+    # SMALLER SYSTEMS (extensions only they use)
+    # =====================================================
+    ".arduboy": "arduboy",
+    ".chf": "channelf",
+    ".sv": "supervision",
+    ".t81": "zx81",
+    ".uze": "uzebox",
+    ".jar": "j2me",
+    ".prc": "palm",
+    ".wasm": "wasm4",
+    ".nx": "lowresnx",
 }
