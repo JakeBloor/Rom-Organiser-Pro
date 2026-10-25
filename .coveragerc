@@ -1,0 +1,12 @@
+[run]
+branch = True
+source =
+    app
+    config
+    modules
+
+[report]
+show_missing = True
+exclude_also =
+    if __name__ == .__main__.:
+fail_under = 100

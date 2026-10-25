@@ -1,0 +1,19 @@
+{
+  "esde_home": "~/ES-DE",
+  "default_rom_folder": "~/Emulation/roms",
+  "steam_artwork_dir": "",
+  "srm_config": "~/.config/steam-rom-manager/userData/userConfigurations.json",
+  "multi_file_layout": "shared",
+  "enable_libretro_thumbnails": true,
+  "enable_steamgriddb": true,
+  "steamgriddb_api": "58e1ea89a891ec6dde2f818155da4146",
+  "enable_screenscraper": true,
+  "screenscraper_user": "ChibiChan10",
+  "screenscraper_password": "Wasp1504",
+  "scraper_region": "us",
+  "scraper_language": "en",
+  "scraper_threads": 4,
+  "host": "127.0.0.1",
+  "port": 8181,
+  "debug": false
+}

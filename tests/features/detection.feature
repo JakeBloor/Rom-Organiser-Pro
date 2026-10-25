@@ -110,3 +110,57 @@ Feature: ROM System Detection
     Then system map should contain extensions
     And all systems should be mapped to valid systems
     And system map should have at least 100 extensions
+
+  Scenario: SNES archive in snes folder is not detected as NES
+    Given a ROM with path "/roms/snes/zelda.zip"
+    When the system detection runs
+    Then the detected system should be "snes"
+
+  Scenario: GBA archive in gba folder is not detected as Game Boy
+    Given a ROM with path "/roms/gba/pokemon_emerald.zip"
+    When the system detection runs
+    Then the detected system should be "gba"
+
+  Scenario: Arcade in a file name does not make it an arcade ROM
+    Given a ROM with path "/roms/n64/arcade_racer.z64"
+    When the system detection runs
+    Then the detected system should be "n64"
+
+  Scenario: Folder names with spaces match folder hints
+    Given a ROM with path "/roms/PlayStation 2/gran_turismo_4.iso"
+    When the system detection runs
+    Then the detected system should be "ps2"
+
+  Scenario Outline: Files that aren't ROMs for any system are not detected
+    Given a ROM with path "<path>"
+    When the system detection runs
+    Then no system should be detected
+
+    Examples:
+      | path                    |
+      | /roms/snes/README       |
+      | /roms/snes/notes.xyz    |
+      | /roms/mame/readme.txt   |
+
+  Scenario Outline: Ambiguous files outside system folders are guessed only when allowed
+    Given a ROM with path "<path>"
+    When the system detection runs
+    Then the detected system should be "<guess>"
+    When the system detection runs without guessing
+    Then no system should be detected
+
+    Examples:
+      | path                    | guess      |
+      | /downloads/game.iso     | ps5        |
+      | /downloads/disk.dsk     | amstradcpc |
+
+  Scenario Outline: Zips whose contents don't decide a system are not sorted
+    Given a zip on disk holding <contents>
+    When the system detection runs without guessing
+    Then no system should be detected
+
+    Examples:
+      | contents                         |
+      | "Game (Disc 1).sfc" and "Game (Disc 2).sfc" |
+      | "Game.iso"                       |
+      | "Game.xyz"                       |

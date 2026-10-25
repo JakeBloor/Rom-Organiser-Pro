@@ -1,8 +1,12 @@
 import re
 from pathlib import Path
 from config import SYSTEM_MAP, SYSTEM_PRIORITY, AMBIGUOUS_EXTENSIONS, SYSTEM_ROM_TYPES
+from modules.archives import sniff_disc_system, zip_rom_member
 
 DISC_REGEX = re.compile(r"(disc|disk|cd)[\s_-]*(\d+)", re.I)
+
+# Extensions whose header can be sniffed when the folder doesn't say the system
+SNIFFABLE_DISC_SUFFIXES = {".iso", ".bin", ".img"}
 
 # ========= FOLDER HEURISTICS =========
 # Used to disambiguate systems when extensions are shared
@@ -18,7 +22,7 @@ FOLDER_HINTS = {
     "dreamcast": ["dreamcast", "dc", "sega dc"],
     "xboxone": ["xboxone", "xbox one"],
     "xboxseriesx": ["xboxseriesx", "xbox series x", "xbox series", "xboxseries"],
-    "jaguarcd": ["jaguarcd", "jaguar cd"],
+    "atarijaguarcd": ["atarijaguarcd", "jaguarcd", "jaguar cd"],
     "dos": ["dos", "msdos"],
     "gc": ["gamecube", "gc"],
     "wii": ["wii"],
@@ -50,41 +54,78 @@ def get_disc_number(name):
     return int(m.group(2)) if m else None
 
 
-def detect_arcade(path):
-    p = str(path).lower()
+def _normalise(name):
+    """Lowercase and drop separators, so "PlayStation 2" matches "playstation2"."""
+    return re.sub(r"[^a-z0-9]", "", name.lower())
 
-    for system, keywords in ARCADE_SYSTEM_KEYWORDS.items():
-        for keyword in keywords:
-            if keyword in p:
-                return system
+
+NORMALISED_FOLDER_HINTS = {
+    system: {_normalise(hint) for hint in hints} for system, hints in FOLDER_HINTS.items()
+}
+NORMALISED_ARCADE_KEYWORDS = {
+    system: {_normalise(keyword) for keyword in keywords}
+    for system, keywords in ARCADE_SYSTEM_KEYWORDS.items()
+}
+
+
+def _folder_names(file_path):
+    """Normalised parent folder names, nearest folder first."""
+    names = (_normalise(part) for part in reversed(file_path.parent.parts))
+    return [name for name in names if name]
+
+
+def _accepts(system, suffix):
+    """True if suffix is a ROM type for system (systems without a type list accept anything)."""
+    return system not in SYSTEM_ROM_TYPES or suffix in SYSTEM_ROM_TYPES[system]
+
+
+def detect_arcade(path):
+    path = Path(path)
+    suffix = path.suffix.lower()
+
+    for folder in _folder_names(path):
+        for system, keywords in NORMALISED_ARCADE_KEYWORDS.items():
+            if folder not in keywords:
+                continue
+            # e.g. a .chd in an "arcade" folder goes to the first arcade
+            # system that supports CHDs
+            for arcade_system in [system, *NORMALISED_ARCADE_KEYWORDS]:
+                if _accepts(arcade_system, suffix):
+                    return arcade_system
 
     return None
 
 
-def detect_system(file_path):
+def detect_system(file_path, allow_guess=True):
     """
     Detect system from file path using multiple strategies:
-    1. Arcade detection by folder keyword
-    2. Folder heuristics (if extension is ambiguous)
-    3. Extension mapping
-    4. SYSTEM_ROM_TYPES validation (confirm extension is valid for system)
-    5. SYSTEM_PRIORITY for disambiguation
+    1. Arcade detection by folder name
+    2. Extension mapping, validated against SYSTEM_ROM_TYPES
+    3. For ambiguous extensions: folder names (nearest first), matched whole
+       against FOLDER_HINTS and system IDs
+    4. For files that exist: the single ROM inside a .zip, or the header of a
+       disc image
+    5. SYSTEM_PRIORITY for disambiguation (skipped when allow_guess is False,
+       so callers that move files never act on a guess)
+
+    Folder names are compared whole (after normalising case and separators), so
+    "snes" never matches "nes" and "gba" never matches "gb".
 
     Args:
         file_path: Path object or string representing the file
+        allow_guess: Fall back to SYSTEM_PRIORITY when nothing else decides
 
     Returns:
         System ID string (e.g., "ps2", "psx"), or None if not found
     """
-    file_path = Path(file_path) if isinstance(file_path, str) else file_path
+    file_path = Path(file_path)
     suffix = file_path.suffix.lower()
-    parent_path = str(file_path.parent).lower()
 
     # Skip non-file entries
     if not suffix:
         return None
 
-    # Arcade detection by folder keyword
+    # Arcade detection by folder name
     arcade = detect_arcade(file_path)
     if arcade:
         return arcade
@@ -95,67 +136,40 @@ def detect_system(file_path):
     else:
         # Get system from regular SYSTEM_MAP
         sys = SYSTEM_MAP.get(suffix)
-        if sys:
-            # Validate that extension is in SYSTEM_ROM_TYPES for this system
-            if sys in SYSTEM_ROM_TYPES:
-                if suffix in SYSTEM_ROM_TYPES[sys]:
-                    return sys
-            else:
-                return sys
+        if sys and _accepts(sys, suffix):
+            return sys
         return None
 
-    # Multiple candidates - first check folder heuristics across ALL known systems
-    # This ensures archive files (zip/7z) inherit the parent folder system
-    for system, hints in FOLDER_HINTS.items():
-        for hint in hints:
-            if hint in parent_path:
-                if system in SYSTEM_ROM_TYPES:
-                    if suffix in SYSTEM_ROM_TYPES[system]:
-                        return system
-                else:
-                    return system
-
-    # Fallback: check raw system IDs in parent path (covers folders like 'atari2600')
-    # For archive/ambiguous extensions, allow folder hint to override even if
-    # the system's SYSTEM_ROM_TYPES doesn't list the archive extension.
-    for system in SYSTEM_ROM_TYPES.keys():
-        if system in parent_path:
-            if (
-                suffix in SYSTEM_ROM_TYPES[system]
-                or suffix in AMBIGUOUS_EXTENSIONS
-            ):
+    # Multiple candidates - check folder names across ALL known systems, nearest
+    # folder first. Archives (zip/7z) and other ambiguous files inherit the
+    # system of a folder named after it (e.g. "snes"), even if SYSTEM_ROM_TYPES
+    # doesn't list the extension. Arcade folders were handled above.
+    for folder in _folder_names(file_path):
+        for system, hints in NORMALISED_FOLDER_HINTS.items():
+            if folder in hints and _accepts(system, suffix):
                 return system
 
-    # Then prefer folder heuristics restricted to candidate list (legacy behavior)
-    for system in candidates:
-        if system in FOLDER_HINTS:
-            for hint in FOLDER_HINTS[system]:
-                if hint in parent_path:
-                    # Validate this system actually uses this extension
-                    if (
-                        system in SYSTEM_ROM_TYPES
-                        and suffix in SYSTEM_ROM_TYPES[system]
-                    ):
-                        return system
-                    elif system not in SYSTEM_ROM_TYPES:
-                        return system
+        if folder in SYSTEM_ROM_TYPES and folder not in ARCADE_SYSTEM_KEYWORDS:
+            return folder
 
-    # Use SYSTEM_PRIORITY to disambiguate
-    for prioritized_system in SYSTEM_PRIORITY:
-        if prioritized_system in candidates:
-            # Validate this system actually uses this extension
-            if prioritized_system in SYSTEM_ROM_TYPES:
-                if suffix in SYSTEM_ROM_TYPES[prioritized_system]:
-                    return prioritized_system
-            else:
-                return prioritized_system
+    # Nothing in the folder names: look inside the file
+    if file_path.is_file():
+        if suffix == ".zip":
+            member = zip_rom_member(file_path)
+            inner_suffix = Path(member).suffix.lower() if member else ""
+            if inner_suffix and inner_suffix not in AMBIGUOUS_EXTENSIONS:
+                inner = SYSTEM_MAP.get(inner_suffix)
+                if inner and _accepts(inner, inner_suffix):
+                    return inner
 
-    # No priority match - return first valid candidate
-    for candidate in candidates:
-        if candidate in SYSTEM_ROM_TYPES:
-            if suffix in SYSTEM_ROM_TYPES[candidate]:
-                return candidate
-        else:
-            return candidate
+        if suffix in SNIFFABLE_DISC_SUFFIXES:
+            sniffed = sniff_disc_system(file_path)
+            if sniffed:
+                return sniffed
 
-    return None
+    if not allow_guess:
+        return None
+
+    # Guess: SYSTEM_PRIORITY order first, then the candidates' own order
+    ordered = [s for s in SYSTEM_PRIORITY if s in candidates] + list(candidates)
+    return next((s for s in ordered if _accepts(s, suffix)), None)

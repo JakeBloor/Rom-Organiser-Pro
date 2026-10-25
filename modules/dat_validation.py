@@ -1,67 +1,118 @@
 import re
 import xml.etree.ElementTree as ET
-from config import DAT_DIR
+from config import DAT_DIR, DAT_SYSTEM_IDS
 from modules.dat_fetcher import DATFetcher
 
+# md5/sha1 (lowercase hex) -> (game name, ES-DE system or None, DAT title)
+# The DAT title, e.g. "Nintendo - Game Boy", is also the game's libretro
+# thumbnail folder.
 DAT_DB = {}
 IGNORED_DAT_DIRS = {"dat", "metadat", "rdb"}
 
+# libretro-database keeps the No-Intro and Redump DATs (the ones with hashes for
+# mainstream systems) under metadat/, so these are loaded alongside dat/
+METADAT_DAT_DIRS = ("no-intro", "redump")
+
+# Top-level game blocks start at the beginning of a line
+GAME_BLOCK_REGEX = re.compile(r"^\s*game\s*\(", re.IGNORECASE | re.MULTILINE)
+# Quoted strings are matched whole so a ")" inside a ROM name such as
+# "Game (Japan).nes" doesn't end the rom ( ... ) block early
+ROM_BLOCK_REGEX = re.compile(r'\brom\s*\(((?:[^()"]|"[^"]*")*)\)', re.IGNORECASE)
+
 
 def _is_ignored_dat_path(dat_path):
-    try:
-        relative_parts = dat_path.relative_to(DAT_DIR).parts
-    except Exception:
-        return False
-
+    relative_parts = dat_path.relative_to(DAT_DIR).parts
     return any(part.lower() in IGNORED_DAT_DIRS for part in relative_parts)
 
 
-def _load_clrmamepro_dat(dat, logger):
+def _dat_collection(dat_path):
+    parts = [part.lower() for part in dat_path.parts]
+    for name in METADAT_DAT_DIRS:
+        if name in parts:
+            return name
+    return "dat"
+
+
+def _sorted_dats(root):
+    if not root.exists():
+        return []
+
+    return sorted(
+        root.rglob("*.dat"),
+        key=lambda p: (
+            len(p.relative_to(root).parts),
+            p.relative_to(root).as_posix(),
+        ),
+    )
+
+
+DAT_SYSTEMS_BY_NAME = {name.lower(): system for name, system in DAT_SYSTEM_IDS.items()}
+
+
+def dat_title(dat_path):
+    """"Nintendo - Wii (Digital).dat" -> "Nintendo - Wii"."""
+    return re.sub(r"\s*\([^)]*\)$", "", dat_path.stem)
+
+
+def dat_system(dat_path):
+    """ES-DE system for a DAT, e.g. "Nintendo - Wii (Digital).dat" -> "wii"."""
+    return DAT_SYSTEMS_BY_NAME.get(dat_path.stem.lower()) or DAT_SYSTEMS_BY_NAME.get(
+        dat_title(dat_path).lower()
+    )
+
+
+def _add_rom(entry, md5, sha1):
+    # CRCs aren't stored: lookups only use md5/sha1, and CRC32 collides too
+    # easily across a million entries to identify a game on its own
+    if md5:
+        DAT_DB[md5.lower()] = entry
+    if sha1:
+        DAT_DB[sha1.lower()] = entry
+
+
+def _iter_dat_files():
+    libretro_dir = DAT_DIR / "libretro"
+
+    if libretro_dir.exists() and any(libretro_dir.rglob("*.dat")):
+        yield from _sorted_dats(libretro_dir)
+    else:
+        for dat in _sorted_dats(DAT_DIR):
+            if not _is_ignored_dat_path(dat):
+                yield dat
+
+    for name in METADAT_DAT_DIRS:
+        yield from _sorted_dats(DAT_DIR / "metadat" / name)
+
+
+def _load_clrmamepro_dat(dat, logger, system, title):
     try:
         text = dat.read_text(errors="ignore")
         entries = 0
 
-        for game_start in re.finditer(r"game\s*\(", text, re.IGNORECASE):
-            idx = game_start.end()
-            depth = 1
-            while idx < len(text) and depth > 0:
-                ch = text[idx]
-                if ch == '"':
-                    idx += 1
-                    while idx < len(text) and text[idx] != '"':
-                        if text[idx] == "\\":
-                            idx += 1
-                        idx += 1
-                elif ch == "(":
-                    depth += 1
-                elif ch == ")":
-                    depth -= 1
-                idx += 1
+        starts = [m.end() for m in GAME_BLOCK_REGEX.finditer(text)]
 
-            game_block = text[game_start.end() : idx - 1]
+        for start, end in zip(starts, starts[1:] + [len(text)]):
+            game_block = text[start:end]
             name_match = re.search(r'name\s+"([^"]+)"', game_block)
             if not name_match:
                 continue
 
-            game_name = name_match.group(1)
+            entry = (name_match.group(1), system, title)
 
-            for rom_match in re.finditer(
-                r"rom\s*\((.*?)\)", game_block, re.DOTALL | re.IGNORECASE
-            ):
+            for rom_match in ROM_BLOCK_REGEX.finditer(game_block):
                 rom_block = rom_match.group(1)
-                md5_match = re.search(r"md5\s+([0-9A-Fa-f]+)", rom_block)
-                sha1_match = re.search(r"sha1\s+([0-9A-Fa-f]+)", rom_block)
-                crc_match = re.search(r"crc\s+([0-9A-Fa-f]+)", rom_block)
+                md5_match = re.search(r"\bmd5\s+([0-9A-Fa-f]+)", rom_block)
+                sha1_match = re.search(r"\bsha1\s+([0-9A-Fa-f]+)", rom_block)
+                crc_match = re.search(r"\bcrc\s+([0-9A-Fa-f]+)", rom_block)
 
                 if not (md5_match or sha1_match or crc_match):
                     continue
 
-                if md5_match:
-                    DAT_DB[md5_match.group(1).lower()] = game_name
-                if sha1_match:
-                    DAT_DB[sha1_match.group(1).lower()] = game_name
-                if crc_match:
-                    DAT_DB[crc_match.group(1).lower()] = game_name
+                _add_rom(
+                    entry,
+                    md5_match and md5_match.group(1),
+                    sha1_match and sha1_match.group(1),
+                )
 
                 entries += 1
 
@@ -69,8 +120,8 @@ def _load_clrmamepro_dat(dat, logger):
             logger(f"[DAT] Loaded {entries} entries from {dat.name} (clrmamepro)")
             return True
 
-    except Exception as e:
-        logger(f"[DAT ERROR] {dat.name} clrmamepro parse failed: {e}")
+    except OSError as e:
+        logger(f"[DAT ERROR] {dat.name} clrmamepro parse failed: {e}", "ERROR")
 
     return False
 
@@ -78,131 +129,87 @@ def _load_clrmamepro_dat(dat, logger):
 def load_dat_files(logger):
     DAT_DB.clear()
 
-    seen_names = set()
-    libretro_dir = DAT_DIR / "libretro"
-    use_libretro = libretro_dir.exists() and any(libretro_dir.rglob("*.dat"))
+    # No-Intro and libretro both ship e.g. "Nintendo - Super Nintendo
+    # Entertainment System.dat", so names only need to be unique per collection
+    seen = set()
 
-    if use_libretro:
-        dat_files = sorted(
-            libretro_dir.rglob("*.dat"),
-            key=lambda p: (
-                len(p.relative_to(libretro_dir).parts),
-                p.relative_to(libretro_dir).as_posix(),
-            ),
-        )
-    else:
-        dat_files = sorted(
-            DAT_DIR.rglob("*.dat"),
-            key=lambda p: (
-                len(p.relative_to(DAT_DIR).parts),
-                p.relative_to(DAT_DIR).as_posix(),
-            ),
-        )
-
-    for dat in dat_files:
-        if not use_libretro and _is_ignored_dat_path(dat):
+    for dat in _iter_dat_files():
+        key = (_dat_collection(dat), dat.name)
+        if key in seen:
             continue
 
-        if dat.name in seen_names:
-            continue
-
-        seen_names.add(dat.name)
+        seen.add(key)
+        system = dat_system(dat)
+        title = dat_title(dat)
 
         try:
-            try:
-                tree = ET.parse(dat)
-                root = tree.getroot()
-                count = 0
+            tree = ET.parse(dat)
+        except (ET.ParseError, OSError):
+            # Not XML: most libretro DATs are in clrmamepro format
+            if not _load_clrmamepro_dat(dat, logger, system, title):
+                logger(
+                    f"[DAT WARN] Skipped unsupported or invalid DAT: {dat.name}", "WARNING"
+                )
+            continue
 
-                for game in root.findall(".//game"):
-                    name = game.attrib.get("name")
+        count = 0
 
-                    for rom in game.findall("rom"):
-                        md5 = rom.attrib.get("md5")
-                        sha1 = rom.attrib.get("sha1")
-                        crc = rom.attrib.get("crc")
+        for game in tree.getroot().findall(".//game"):
+            entry = (game.attrib.get("name"), system, title)
 
-                        if md5:
-                            DAT_DB[md5.lower()] = name
-                        if sha1:
-                            DAT_DB[sha1.lower()] = name
-                        if crc:
-                            DAT_DB[crc.lower()] = name
+            for rom in game.findall("rom"):
+                _add_rom(entry, rom.attrib.get("md5"), rom.attrib.get("sha1"))
+                count += 1
 
-                        count += 1
-
-                logger(f"[DAT] Loaded {count} entries from {dat.name}")
-                continue
-            except Exception:
-                pass
-
-            if _load_clrmamepro_dat(dat, logger):
-                continue
-
-            logger(f"[DAT WARN] Skipped unsupported or invalid DAT: {dat.name}")
-
-        except Exception as e:
-            logger(f"[DAT ERROR] {dat.name}: {e}")
+        logger(f"[DAT] Loaded {count} entries from {dat.name}")
 
 
-def fetch_latest_dats(logger, systems=None):
+def fetch_latest_dats(logger):
     """
-    Fetch latest DAT files automatically
+    Fetch the libretro-database DATs. Callers load them with load_dat_files.
+
+    DAT-o-MATIC and Redump only offer downloads through their websites, so if
+    libretro can't be reached the user is pointed at those instead.
 
     Args:
         logger: Logger instance
-        systems (list): Systems to fetch (e.g., ['nes', 'snes', 'psx'])
 
     Returns:
-        dict: Fetch results
+        dict: {"libretro": bool} fetch result
     """
     fetcher = DATFetcher(logger)
 
-    # First try libretro database (fast, single archive).
-    try:
-        logger("Attempting to fetch DATs from libretro database...", "INFO")
-        lr_results = fetcher.fetch_libretro_dats()
-        if lr_results.get("libretro"):
-            logger("Successfully fetched DATs from libretro repository.", "SUCCESS")
-            # Load newly fetched DATs into memory
-            load_dat_files(logger)
-            return {"libretro": True}
-        else:
-            logger(
-                "Libretro fetch returned no DATs, falling back to DAT-o-MATIC.",
-                "WARNING",
-            )
-    except Exception as e:
-        logger(f"Libretro fetch failed: {e}", "ERROR")
+    # fetch_libretro_dats logs and swallows its own errors
+    logger("Attempting to fetch DATs from libretro database...", "INFO")
+    if fetcher.fetch_libretro_dats().get("libretro"):
+        logger("Successfully fetched DATs from libretro repository.", "SUCCESS")
+        return {"libretro": True}
+    logger("Libretro fetch returned no DATs.", "WARNING")
 
-    # Fallback to DAT-o-MATIC guidance
     logger(
-        "⚠️  DAT-o-MATIC may require manual download; attempting scripted fetch where possible.",
+        "No new DATs downloaded; any DATs already on disk will still be used.",
         "WARNING",
     )
     logger(
-        "If scripted fetch fails, download DATs manually from https://datomatic.no-intro.org and place them in dats/.",
-        "INFO",
+        "To add DATs manually, download them from https://datomatic.no-intro.org "
+        "(cartridge systems) or http://redump.org/downloads/ (disc systems) and put "
+        f"them in {DAT_DIR / 'metadat' / 'no-intro'} or {DAT_DIR / 'metadat' / 'redump'}.",
+        "WARNING",
     )
-
-    try:
-        results = fetcher.fetch_no_intro_dats(systems)
-        # If any success, load dats
-        if any(results.values()):
-            load_dat_files(logger)
-        return results
-    except Exception as e:
-        logger(f"DAT fetch error: {e}", "ERROR")
-        logger(
-            "As a workaround, manually download and place DAT files in dats/ folder",
-            "WARNING",
-        )
-        return {}
+    return {"libretro": False}
 
 
-def validate_hashes(hashes):
+def lookup_hashes(hashes):
+    """
+    Return (game name, system, DAT title) for the first hash found in the
+    DATs, else (None, None, None).
+    """
     for h in hashes.values():
         if h.lower() in DAT_DB:
             return DAT_DB[h.lower()]
 
-    return None
+    return None, None, None
+
+
+def validate_hashes(hashes):
+    return lookup_hashes(hashes)[0]

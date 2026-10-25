@@ -10,7 +10,7 @@ pre {
 /* Status panel styles */
 .stat-mini {
     padding: 12px;
-    background: #fff;
+    background: var(--bs-body-bg);
     border-radius: 8px;
     border-left: 4px solid #0d6efd;
     text-align: center;
@@ -25,15 +25,15 @@ pre {
 
 .stat-card {
     padding: 15px;
-    background: #fff;
+    background: var(--bs-body-bg);
     border-radius: 10px;
-    border: 1px solid #dee2e6;
+    border: 1px solid var(--bs-border-color);
     box-shadow: 0 2px 4px rgba(0,0,0,0.1);
 }
 
 .stat-card h5 {
     margin-bottom: 10px;
-    color: #666;
+    color: var(--bs-secondary-color);
     font-size: 0.85rem;
     text-transform: uppercase;
     letter-spacing: 0.5px;
@@ -47,7 +47,7 @@ pre {
 
 /* Progress bar enhancement */
 .progress {
-    background-color: #e9ecef;
+    background-color: var(--bs-secondary-bg);
     border-radius: 10px;
     overflow: hidden;
 }
@@ -68,5 +68,122 @@ pre {
 }
 
 .list-group-item:hover {
-    background-color: #f8f9fa;
+    background-color: var(--bs-tertiary-bg);
+}
+/* Organise run outcome */
+.progress-bar.is-done {
+    background: #198754;
+}
+
+.progress-bar.is-failed {
+    background: #dc3545;
+}
+
+.raw-status {
+    max-height: 300px;
+    margin-top: 8px;
+}
+
+/* ---- Report charts ----
+   One validated hue per theme (passes contrast against both chart surfaces);
+   text uses the theme's text colours, never the bar colour. */
+:root,
+[data-bs-theme="light"] {
+    --chart-bar: #2a78d6;
+}
+
+[data-bs-theme="dark"] {
+    --chart-bar: #3987e5;
+}
+
+.chart-title {
+    font-size: 0.9rem;
+    font-weight: 600;
+    margin-bottom: 0.5rem;
+}
+
+.bar-chart {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+/* The whole row is the hover/focus target, bigger than the bar itself */
+.bar-row {
+    display: grid;
+    grid-template-columns: minmax(6rem, 38%) 1fr;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 3px 4px;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    cursor: default;
+}
+
+.bar-row:hover,
+.bar-row:focus-visible {
+    background: var(--bs-tertiary-bg);
+    outline: none;
+}
+
+.bar-label {
+    color: var(--bs-body-color);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+/* Bars grow from a baseline on the left, value label at the tip */
+.bar-track {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    border-left: 1px solid var(--bs-border-color);
+    min-height: 20px;
+}
+
+.bar {
+    flex: none;
+    width: calc((100% - 3.5rem) * var(--fraction, 0));
+    height: 14px;
+    background: var(--chart-bar);
+    border-radius: 0 4px 4px 0;
+}
+
+.bar-value {
+    flex: none;
+    color: var(--bs-secondary-color);
+    font-variant-numeric: tabular-nums;
+}
+
+.chart-table summary {
+    cursor: pointer;
+}
+
+.chart-tip {
+    position: fixed;
+    z-index: 1080;
+    max-width: 18rem;
+    padding: 4px 8px;
+    font-size: 0.8rem;
+    color: var(--bs-body-color);
+    background: var(--bs-body-bg);
+    border: 1px solid var(--bs-border-color);
+    border-radius: 6px;
+    box-shadow: 0 2px 6px rgba(0, 0, 0, 0.15);
+    pointer-events: none;
+    opacity: 0;
+}
+
+.chart-tip.is-visible {
+    opacity: 1;
+}
+
+/* Scan picker: system checkboxes in columns, scrolling when there are many */
+.system-list {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(9rem, 1fr));
+  gap: 0.25rem 1rem;
+  max-height: 14rem;
+  overflow-y: auto;
 }

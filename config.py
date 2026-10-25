@@ -1,37 +1,141 @@
-import os
+"""
+Fixed tables the app works from: systems, extensions, DAT names and layout
+rules. Settings you can change (folders, accounts, server) live in
+settings.json and are edited on the Settings page; see modules/settings.py.
+"""
+
 from pathlib import Path
 
 # ========= PATHS =========
 
-EMUDECK_ROOT = Path.home() / "Emulation" / "roms"
 DAT_DIR = Path("./dats")
 CACHE_DIR = Path("./cache")
 LOG_DIR = Path("./logs")
 MEDIA_DIR = Path("./media")
 
-# ========= API CONFIG =========
+# ========= SCRAPING =========
 
-# SteamGridDB
-STEAMGRIDDB_API = "58e1ea89a891ec6dde2f818155da4146"
+# Skyscraper platform names that differ from the ES-DE/EmuDeck folder names
+SKYSCRAPER_PLATFORMS = {
+    "genesis": "megadrive",
+    "n3ds": "3ds",
+    "fbneo": "arcade",
+    "dos": "pc",
+}
 
-# ScreenScraper
-SCREENSCRAPER_USER = "ChibiChan10"
-SCREENSCRAPER_PASSWORD = "Wasp1504"
+# ========= LAYOUT =========
+# How games made of several files (a .cue/.gdi with tracks, or several discs)
+# are stored, chosen on the Settings page:
+#
+# "shared" (default) suits both ES-DE and Steam ROM Manager. The files go in
+#   <roms>/.multifile/<system>/<game>/ and a <game>.m3u playlist in the
+#   system folder points at them, so each game is listed exactly once. Only
+#   used for M3U_SYSTEMS; other systems keep their files in the system folder.
+# "esde" uses ES-DE's "directories interpreted as files" folders
+#   (<system>/<game>.m3u/). Tidiest in ES-DE, but EmuDeck's Steam ROM Manager
+#   parsers add the folder and every disc inside it as separate shortcuts.
 
-# ========= SCRAPER SETTINGS =========
+MULTI_FILE_DIR = ".multifile"
 
-ENABLE_STEAMGRIDDB = True
-ENABLE_SCREENSCRAPER = True
-ENABLE_IGDB = False
-ENABLE_RETROACHIEVEMENTS = False
-ENABLE_VIDEO_SCRAPING = False
-ENABLE_SCREENSHOTS = True
-ENABLE_BOXART = True
-ENABLE_LOGOS = True
+# Systems whose EmuDeck Steam ROM Manager parser accepts .m3u playlists
+M3U_SYSTEMS = {
+    "amiga",
+    "amiga1200",
+    "amiga600",
+    "amigacd32",
+    "c16",
+    "c64",
+    "dreamcast",
+    "gc",
+    "pcfx",
+    "psx",
+    "saturn",
+    "segacd",
+    "vic20",
+    "wii",
+    "x68000",
+}
 
-SCRAPER_THREADS = 4
-SCRAPER_REGION = "us"
-SCRAPER_LANGUAGE = "en"
+# ========= DAT SYSTEMS =========
+# Maps DAT names (No-Intro / Redump / libretro, matched case-insensitively,
+# with any trailing "(Digital)"-style suffix removed) to ES-DE system folders,
+# so a hash match tells the organiser which system a file belongs to. The
+# names are libretro's exactly, as they double as libretro thumbnail folders.
+
+DAT_SYSTEM_IDS = {
+    "Nintendo - Nintendo Entertainment System": "nes",
+    "Nintendo - Family Computer Disk System": "fds",
+    "Nintendo - Super Nintendo Entertainment System": "snes",
+    "Nintendo - Satellaview": "satellaview",
+    "Nintendo - Nintendo 64": "n64",
+    "Nintendo - Nintendo 64DD": "n64dd",
+    "Nintendo - Game Boy": "gb",
+    "Nintendo - Game Boy Color": "gbc",
+    "Nintendo - Game Boy Advance": "gba",
+    "Nintendo - Nintendo DS": "nds",
+    "Nintendo - Nintendo DSi": "nds",
+    "Nintendo - Nintendo 3DS": "n3ds",
+    "Nintendo - New Nintendo 3DS": "n3ds",
+    "Nintendo - Virtual Boy": "virtualboy",
+    "Nintendo - Pokemon Mini": "pokemini",
+    "Nintendo - GameCube": "gc",
+    "Nintendo - Wii": "wii",
+    "Nintendo - Wii U": "wiiu",
+    "Sega - Master System - Mark III": "mastersystem",
+    "Sega - Game Gear": "gamegear",
+    "Sega - Mega Drive - Genesis": "genesis",
+    "Sega - 32X": "sega32x",
+    "Sega - SG-1000": "sg-1000",
+    "Sega - Mega-CD - Sega CD": "segacd",
+    "Sega - Saturn": "saturn",
+    "Sega - Dreamcast": "dreamcast",
+    "Sega - Naomi": "naomi",
+    "Sega - Naomi 2": "naomi2",
+    "Sony - PlayStation": "psx",
+    "Sony - PlayStation 2": "ps2",
+    "Sony - PlayStation 3": "ps3",
+    "Sony - PlayStation Portable": "psp",
+    "Sony - PlayStation Vita": "psvita",
+    "NEC - PC Engine - TurboGrafx 16": "pcengine",
+    "NEC - PC Engine SuperGrafx": "supergrafx",
+    "NEC - PC Engine CD - TurboGrafx-CD": "pcenginecd",
+    "NEC - PC-FX": "pcfx",
+    "SNK - Neo Geo Pocket": "ngp",
+    "SNK - Neo Geo Pocket Color": "ngpc",
+    "SNK - Neo Geo CD": "neogeocd",
+    "Bandai - WonderSwan": "wonderswan",
+    "Bandai - WonderSwan Color": "wonderswancolor",
+    "Atari - 2600": "atari2600",
+    "Atari - 5200": "atari5200",
+    "Atari - 7800": "atari7800",
+    "Atari - Lynx": "atarilynx",
+    "Atari - Jaguar": "atarijaguar",
+    "Atari - Jaguar CD": "atarijaguarcd",
+    "Atari - ST": "atarist",
+    "Atari - 8-bit": "atari800",
+    "Commodore - 64": "c64",
+    "Commodore - Amiga": "amiga",
+    "Commodore - VIC-20": "vic20",
+    "Commodore - CD32": "amigacd32",
+    "Commodore - CDTV": "cdtv",
+    "Microsoft - MSX": "msx",
+    "Microsoft - MSX2": "msx2",
+    "Microsoft - Xbox": "xbox",
+    "Microsoft - Xbox 360": "xbox360",
+    "Coleco - ColecoVision": "colecovision",
+    "Mattel - Intellivision": "intellivision",
+    "GCE - Vectrex": "vectrex",
+    "Magnavox - Odyssey2": "odyssey2",
+    "The 3DO Company - 3DO": "3do",
+    "Philips - CD-i": "cdimono1",
+    "Sinclair - ZX Spectrum": "zxspectrum",
+    "Amstrad - CPC": "amstradcpc",
+    "Sharp - X68000": "x68000",
+    "DOS": "dos",
+    "ScummVM": "scummvm",
+    "PICO-8": "pico8",
+    "TIC-80": "tic80",
+}
 
 # ========= SYSTEM PRIORITY =========
 # Used for ambiguous extensions (e.g., .iso, .cue, .bin, .chd)
@@ -64,7 +168,7 @@ SYSTEM_PRIORITY = [
     # CD-based
     "segacd",
     "pcenginecd",
-    "jaguarcd",
+    "atarijaguarcd",
 ]
 
 # ========= AMBIGUOUS EXTENSION MAPPING =========
@@ -90,21 +194,47 @@ AMBIGUOUS_EXTENSIONS = {
         "xboxseriesx",
         "psp",
         "pcenginecd",
-        "jaguarcd",
+        "atarijaguarcd",
         "dos",
+        "saturn",
+        "xbox",
     ],
-    # PKG files can be PS3, PS4 or PS5 packages
-    ".pkg": ["ps3", "ps4", "ps5"],
+    # PKG files can be PS3, PS4, PS5 or Vita packages
+    ".pkg": ["ps3", "ps4", "ps5", "psvita"],
     # CUE files (cue/bin pairs)
-    ".cue": ["psx", "segacd", "dreamcast", "pcenginecd"],
+    ".cue": ["psx", "segacd", "dreamcast", "pcenginecd", "atarijaguarcd", "dos"],
     ".bin": ["psx", "segacd", "dreamcast"],
-    # CHD compressed format (multi-system)
-    ".chd": ["saturn", "gc", "wii", "wiiu", "fbneo", "mame", "arcade"],
+    # CHD compressed format (multi-system; the usual format for PS1/PS2/Dreamcast on EmuDeck)
+    ".chd": [
+        "psx",
+        "ps2",
+        "dreamcast",
+        "saturn",
+        "segacd",
+        "pcenginecd",
+        "pcengine",
+        "psp",
+        "gc",
+        "wii",
+        "wiiu",
+        "fbneo",
+        "mame",
+        "arcade",
+    ],
+    # Compressed and EBOOT disc images shared by PlayStation systems
+    ".cso": ["ps2", "psp"],
+    ".pbp": ["psx", "psp"],
     # IMG format (also multi-system)
     ".img": ["psx", "saturn", "dreamcast"],
     # ZIP archives (can be arcade or other)
-    ".zip": ["fbneo", "mame", "arcade"],
-    ".7z": ["fbneo", "mame", "arcade"],
+    ".zip": ["fbneo", "mame", "arcade", "neogeo"],
+    ".7z": ["fbneo", "mame", "arcade", "neogeo"],
+    # Home computer disk and tape images
+    ".dsk": ["amstradcpc", "zxspectrum", "msx"],
+    ".tap": ["zxspectrum", "c64"],
+    ".prg": ["c64", "vic20"],
+    ".t64": ["c64", "vic20"],
+    ".rom": ["msx", "atarijaguar"],
 }
 
 # ========= ROM TYPE DEFINITIONS =========
@@ -117,7 +247,7 @@ SYSTEM_ROM_TYPES = {
     "fds": [".fds"],
     "snes": [".smc", ".sfc", ".fig", ".swc"],
     "n64": [".n64", ".z64", ".v64"],
-    "gc": [".gcm", ".gcz", ".rvz", ".tgc", ".chd"],
+    "gc": [".gcm", ".gcz", ".rvz", ".tgc", ".iso", ".chd"],
     "wii": [".wbfs", ".wad", ".wia", ".iso"],
     "wiiu": [".wud", ".wux", ".wua", ".iso"],
     "switch": [".xci", ".nsp", ".nsz"],
@@ -130,12 +260,12 @@ SYSTEM_ROM_TYPES = {
     "wonderswan": [".ws"],
     "wonderswancolor": [".wsc"],
     # Sony
-    "psx": [".pbp", ".cue", ".bin", ".ecm", ".img", ".iso"],
-    "ps2": [".iso", ".isz", ".cso"],
+    "psx": [".pbp", ".cue", ".bin", ".ecm", ".img", ".iso", ".chd"],
+    "ps2": [".iso", ".isz", ".cso", ".chd"],
     "ps3": [".iso", ".pkg", ".ps3"],
     "ps4": [".iso", ".pkg"],
     "ps5": [".iso", ".pkg"],
-    "psp": [".iso", ".cso", ".pbp"],
+    "psp": [".iso", ".cso", ".pbp", ".chd"],
     "psvita": [".vpk", ".pkg"],
     # Sega
     "mastersystem": [".sms"],
@@ -143,8 +273,8 @@ SYSTEM_ROM_TYPES = {
     "genesis": [".gen", ".md", ".smd"],
     "sega32x": [".32x"],
     "saturn": [".iso", ".ccd", ".chd", ".img"],
-    "segacd": [".iso", ".cue", ".bin"],
-    "dreamcast": [".iso", ".cdi", ".cue", ".bin", ".gdi"],
+    "segacd": [".iso", ".cue", ".bin", ".chd"],
+    "dreamcast": [".iso", ".cdi", ".cue", ".bin", ".gdi", ".chd"],
     # NEC
     "pcengine": [".pce", ".chd"],
     "pcenginecd": [".iso", ".cue", ".chd"],
@@ -166,8 +296,8 @@ SYSTEM_ROM_TYPES = {
     "atari5200": [".a52"],
     "atari7800": [".a78"],
     "atarilynx": [".lnx"],
-    "jaguar": [".j64", ".jag", ".abs", ".rom"],
-    "jaguarcd": [".iso", ".cue"],
+    "atarijaguar": [".j64", ".jag", ".abs", ".rom"],
+    "atarijaguarcd": [".iso", ".cue"],
     "atari800": [".atr", ".xfd", ".atx"],
     "atarist": [".st", ".msa", ".stx"],
     # Commodore
@@ -203,9 +333,9 @@ SYSTEM_MAP = {
     ".a52": "atari5200",
     ".a78": "atari7800",
     ".lnx": "atarilynx",
-    ".j64": "jaguar",
-    ".jag": "jaguar",
-    ".abs": "jaguar",
+    ".j64": "atarijaguar",
+    ".jag": "atarijaguar",
+    ".abs": "atarijaguar",
     ".atr": "atari800",
     ".xfd": "atari800",
     ".atx": "atari800",
@@ -306,7 +436,6 @@ SYSTEM_MAP = {
     ".d64": "c64",
     ".t64": "c64",
     ".crt": "c64",
-    ".tap": "c64",
     ".prg": "c64",
     ".d81": "c64",
     ".x64": "c64",

@@ -217,3 +217,9 @@ __marimo__/
 
 # Streamlit
 .streamlit/secrets.toml
+
+# Partly written settings.json saves
+.settings-*.json
+
+# Downloaded on startup from the libretro database
+dats/libretro/

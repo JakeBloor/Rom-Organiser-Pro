@@ -6,6 +6,13 @@
 
     <title>ROM Organizer Pro</title>
 
+    <script>
+      // Follow the device's light/dark setting (Bootstrap colour modes)
+      document.documentElement.dataset.bsTheme = matchMedia("(prefers-color-scheme: dark)").matches
+        ? "dark"
+        : "light";
+    </script>
+
     <link
       href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css"
       rel="stylesheet"
@@ -16,10 +23,16 @@
   <body>
     <div class="container py-5">
       <div class="card p-4 shadow-lg">
-        <h1 class="mb-4">🎮 ROM Organizer Pro</h1>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+          <h1 class="mb-0">🎮 ROM Organizer Pro</h1>
+          <div class="d-flex gap-2">
+            <a href="/logs" class="btn btn-outline-secondary">Logs</a>
+            <a href="/settings" class="btn btn-outline-secondary">⚙️ Settings</a>
+          </div>
+        </div>
 
         <!-- STATUS PANEL -->
-        <div class="card mb-4 p-3 bg-light border-info">
+        <div class="card mb-4 p-3 bg-body-tertiary border-info">
           <h5 class="card-title mb-3">📡 System Status</h5>
 
           <!-- Detection Stats -->
@@ -47,16 +60,20 @@
             </div>
           </div>
 
-          <!-- Games by System -->
+          <!-- Library report: refreshed after every scan -->
           <div class="mb-3">
-            <h6>🎮 Active Systems</h6>
-            <div id="gamesBySystem" style="max-height: 400px; overflow-y: auto">
-              <small class="text-muted">Loading...</small>
+            <h6>📚 Library report</h6>
+            <div class="row g-4">
+              <div class="col-lg-4" id="gamesBySystem">
+                <small class="text-body-secondary">Loading...</small>
+              </div>
+              <div class="col-lg-4" id="libraryEsdeMedia"></div>
+              <div class="col-lg-4" id="librarySteamMedia"></div>
             </div>
-            <div class="mt-2">
+            <div class="mt-3">
               <button id="toggleRawBtn" class="btn btn-sm btn-outline-secondary" onclick="toggleRaw()">Show raw JSON</button>
             </div>
-            <pre id="rawStatus" style="display:none; max-height:300px; overflow:auto; background:#f8f9fa; padding:8px; border:1px solid #e1e1e1; margin-top:8px"></pre>
+            <pre id="rawStatus" class="raw-status" style="display:none"></pre>
           </div>
 
           <!-- API Status -->
@@ -69,41 +86,84 @@
             </div>
           </div>
 
+          <div class="mb-3">
+            <button
+              type="button"
+              id="srmBtn"
+              class="btn btn-sm btn-outline-primary"
+              onclick="setupSteamRomManager()"
+            >
+              Use this app's artwork in Steam ROM Manager
+            </button>
+            <small id="srmMessage" class="ms-2 text-body-secondary" role="status"></small>
+          </div>
+
           <div class="mb-2">
             <small class="text-muted"
-              >Last scanned: <span id="lastScanTime">--:--:--</span></small
+              >Last scanned: <span id="lastScanTime">--:--:--</span>
+              <span id="lastScanScope"></span></small
             >
           </div>
         </div>
 
-        <form method="post">
+        <form id="organiseForm" onsubmit="startOrganise(event)">
           <div class="mb-3">
-            <label class="form-label">ROM Import Folder</label>
+            <label class="form-label" for="inputPath">ROM Import Folder</label>
             <input
               class="form-control"
+              id="inputPath"
               name="input_path"
               placeholder="/home/deck/Downloads/NewROMs"
+              required
             />
+            <div class="form-text">
+              New ROMs to sort. Files the app can't identify are left here.
+            </div>
           </div>
 
           <div class="mb-3">
-            <label class="form-label">EmuDeck ROM Folder</label>
+            <label class="form-label" for="romRoot">EmuDeck ROM Folder</label>
             <input
               class="form-control"
-              name="emudeck_path"
-              value="/home/deck/Emulation/roms"
+              id="romRoot"
+              name="rom_root"
+              value="{{ rom_root }}"
+              onchange="loadSystems()"
             />
+            <div class="form-text">
+              Games go into one folder per system here, the way ES-DE expects.
+            </div>
+          </div>
+
+          <div class="form-check form-switch mb-3">
+            <input
+              class="form-check-input"
+              type="checkbox"
+              role="switch"
+              name="dry_run"
+              id="dryRun"
+              {% if status.dry_run %}checked{% endif %}
+              onchange="updateRunButton()"
+            />
+            <label class="form-check-label" for="dryRun">
+              Dry run: preview where files would go without moving anything
+            </label>
           </div>
 
           <div class="row gap-2">
             <div class="col">
-              <button type="submit" class="btn btn-primary btn-lg w-100">
-                Run Organizer
+              <button
+                type="submit"
+                id="organiseBtn"
+                class="btn btn-primary btn-lg w-100"
+              >
+                Preview (dry run)
               </button>
             </div>
             <div class="col">
               <button
                 type="button"
+                id="scanBtn"
                 class="btn btn-info btn-lg w-100"
                 onclick="scanGames()"
               >
@@ -111,56 +171,94 @@
               </button>
             </div>
           </div>
+
+          <fieldset class="mt-3">
+            <legend class="form-label fs-6 mb-1">Systems to scan</legend>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="scan_scope" id="scanAll" value="all" checked onchange="updateScanScope()" />
+              <label class="form-check-label" for="scanAll">All systems</label>
+            </div>
+            <div class="form-check form-check-inline">
+              <input class="form-check-input" type="radio" name="scan_scope" id="scanSelected" value="selected" onchange="updateScanScope()" />
+              <label class="form-check-label" for="scanSelected">Only the systems I pick</label>
+            </div>
+            <div id="systemPicker" class="system-picker mt-2 d-none">
+              <div class="mb-2">
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="pickAllSystems(true)">Select all</button>
+                <button type="button" class="btn btn-sm btn-outline-secondary" onclick="pickAllSystems(false)">Clear</button>
+              </div>
+              <div id="systemList" class="system-list"></div>
+            </div>
+          </fieldset>
+
+          <div id="formMessage" class="alert mt-3 d-none" role="status"></div>
         </form>
         <hr />
 
-        <h4 class="mb-3">📊 Progress</h4>
+        <h4 class="mb-1">📊 Progress</h4>
+        <p class="text-muted mb-2" id="phaseText">Idle</p>
 
-        <div class="progress mb-4" role="progressbar">
-          <div
-            class="progress-bar progress-bar-striped progress-bar-animated"
-            id="progressBar"
-            style="width: {{ progress }}%"
-          >
-            {{ progress }}%
-          </div>
+        <div class="progress mb-4" role="progressbar" aria-label="Organise progress">
+          <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
         </div>
 
-        <div class="row text-center mb-4">
-          <div class="col-md-3">
+        <div class="row text-center mb-4 g-3">
+          <div class="col-6 col-md-2">
             <div class="stat-card">
-              <h5>ROMs Processed</h5>
-              <h2>{{ roms_processed }}</h2>
+              <h5>Organised</h5>
+              <h2 id="statProcessed">0</h2>
             </div>
           </div>
-
-          <div class="col-md-3">
-            <div class="stat-card">
-              <h5>Duplicates</h5>
-              <h2>{{ duplicates }}</h2>
-            </div>
-          </div>
-
-          <div class="col-md-3">
+          <div class="col-6 col-md-2">
             <div class="stat-card">
               <h5>DAT Matches</h5>
-              <h2>{{ dat_matches }}</h2>
+              <h2 id="statDat">0</h2>
             </div>
           </div>
-
-          <div class="col-md-3">
+          <div class="col-6 col-md-2">
             <div class="stat-card">
-              <h5>Artwork Downloads</h5>
-              <h2>{{ artwork_downloads }}</h2>
+              <h5>Covers</h5>
+              <h2 id="statArtwork">0</h2>
+            </div>
+          </div>
+          <div class="col-6 col-md-2">
+            <div class="stat-card">
+              <h5>Duplicates</h5>
+              <h2 id="statDuplicates">0</h2>
+            </div>
+          </div>
+          <div class="col-6 col-md-2">
+            <div class="stat-card">
+              <h5>Unsorted</h5>
+              <h2 id="statUnsorted">0</h2>
+            </div>
+          </div>
+          <div class="col-6 col-md-2">
+            <div class="stat-card">
+              <h5>Skipped</h5>
+              <h2 id="statSkipped">0</h2>
             </div>
           </div>
         </div>
+
+        <!-- Run report: shown once an organise run finishes -->
+        <section id="reportSection" class="card p-3 mb-4 d-none" aria-labelledby="reportTitle">
+          <h4 class="mb-1" id="reportTitle">📈 Run report</h4>
+          <p class="text-body-secondary mb-3" id="reportSummary"></p>
+          <div class="row g-4">
+            <div class="col-lg-6" id="reportOutcomes"></div>
+            <div class="col-lg-6" id="reportSystems"></div>
+            <div class="col-lg-6" id="reportEsdeMedia"></div>
+            <div class="col-lg-6" id="reportSteamMedia"></div>
+          </div>
+          <div id="reportUnsorted" class="mt-3"></div>
+        </section>
 
         <h4>📜 Logs</h4>
 
-        <pre>{{ log }}</pre>
+        <pre id="logOutput"></pre>
 
-        <div class="card mt-4 p-4 bg-light">
+        <div class="card mt-4 p-4 bg-body-tertiary">
           <h4 class="mb-3">🗂️ Best DAT Sources</h4>
 
           <p>
@@ -359,42 +457,99 @@ dats/
 
     <script>
       // Scan games function
-      function scanGames() {
-        const btn = event.target;
-        btn.disabled = true;
-        btn.innerHTML = "🔄 Scanning...";
+      function showFormMessage(text, kind) {
+        const box = document.getElementById("formMessage");
+        box.textContent = text;
+        box.className = `alert mt-3 alert-${kind}`;
+      }
 
-        const emudeckPath = document.querySelector('[name="emudeck_path"]').value;
+      function pickedSystems() {
+        if (!document.getElementById("scanSelected").checked) return null;
+        return [...document.querySelectorAll("#systemList input:checked")].map((box) => box.value);
+      }
+
+      function updateScanScope() {
+        document
+          .getElementById("systemPicker")
+          .classList.toggle("d-none", !document.getElementById("scanSelected").checked);
+      }
+
+      function pickAllSystems(checked) {
+        for (const box of document.querySelectorAll("#systemList input")) box.checked = checked;
+      }
+
+      // Lists the system folders in the ROM folder as checkboxes, keeping any ticks
+      function loadSystems() {
+        const list = document.getElementById("systemList");
+        const ticked = new Set(pickedSystems() || []);
+        const rom_root = document.getElementById("romRoot").value;
+
+        fetch(`/api/systems?${new URLSearchParams({ rom_root })}`, { cache: "no-store" })
+          .then((r) => r.json())
+          .then((data) => {
+            list.replaceChildren();
+            if (!data.systems.length) {
+              list.append(
+                el("small", "text-body-secondary", data.error || "No system folders found in the ROM folder."),
+              );
+              return;
+            }
+            for (const system of data.systems) {
+              const item = el("div", "form-check");
+              const box = el("input", "form-check-input");
+              box.type = "checkbox";
+              box.id = `system-${system}`;
+              box.value = system;
+              box.checked = ticked.has(system);
+              const label = el("label", "form-check-label", system);
+              label.htmlFor = box.id;
+              item.append(box, label);
+              list.append(item);
+            }
+          })
+          .catch((err) => list.replaceChildren(el("small", "text-danger", `Couldn't list systems: ${err.message}`)));
+      }
+
+      function scanGames() {
+        const systems = pickedSystems();
+        if (systems && !systems.length) {
+          showFormMessage("Pick at least one system to scan, or choose All systems.", "warning");
+          return;
+        }
+
+        const btn = document.getElementById("scanBtn");
+        btn.disabled = true;
+        btn.textContent = "🔄 Scanning...";
+
         fetch("/api/scan-games", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
           },
-          body: JSON.stringify({ emudeck_path: emudeckPath }),
-          cache: 'no-store',
+          body: JSON.stringify({ rom_root: document.getElementById("romRoot").value, systems }),
+          cache: "no-store",
         })
           .then((r) => r.json())
           .then((data) => {
             if (data.success) {
-              alert(
-                `✓ Scan complete!\n\nGames found: ${data.total_games}\nSystems: ${data.systems_detected}\nUndetected: ${data.undetected}`,
+              showFormMessage(
+                `Scan complete: ${data.total_games} games across ${data.systems_detected} systems` +
+                  (data.scanned_systems ? ` (scanned ${data.scanned_systems.join(", ")})` : "") +
+                  `, ${data.undetected} undetected files.`,
+                "success",
               );
             } else {
-              alert(`✗ Scan failed: ${data.error}`);
+              showFormMessage(`Scan failed: ${data.error}`, "danger");
             }
             updateStatusPanel();
           })
-          .catch((err) => {
-            console.error("Scan error:", err);
-            alert("Scan failed: " + err.message);
-          })
+          .catch((err) => showFormMessage(`Scan failed: ${err.message}`, "danger"))
           .finally(() => {
             btn.disabled = false;
-            btn.innerHTML = "🔍 Scan Games";
+            btn.textContent = "🔍 Scan Games";
           });
       }
 
-      // Update status panel
       function updateStatusPanel() {
         fetch("/api/status", { cache: 'no-store' })
           .then((r) => r.json())
@@ -405,6 +560,10 @@ dats/
               .last_scan
               ? new Date(data.detection.last_scan).toLocaleTimeString()
               : "--:--:--";
+            const scope = data.detection.scanned_systems;
+            document.getElementById("lastScanScope").textContent = data.detection.last_scan
+              ? scope ? `(only ${scope.join(", ")})` : "(all systems)"
+              : "";
 
             // Update detection stats
             document.getElementById("totalGames").textContent =
@@ -414,36 +573,19 @@ dats/
             document.getElementById("undetectedCount").textContent =
               data.detection.undetected_count;
 
-            // Update games by system (top 10)
-            const gamesBySystem = document.getElementById("gamesBySystem");
-            if (Object.keys(data.detection.games_by_system).length === 0) {
-              gamesBySystem.innerHTML =
-                '<small class="text-muted">No games detected yet. Click "Scan Games" to detect your collection.</small>';
-            } else {
-              let html = '<div class="list-group">';
-              const totalGames = data.detection.total_games || 1;
-              const systems = Object.entries(data.detection.games_by_system)
-                .filter(([s, c]) => c && c > 0)
-                .sort((a, b) => b[1] - a[1]);
-              systems.forEach(([system, count]) => {
-                const percentVal = (count / totalGames) * 100;
-                const displayPercent = count > 0 && percentVal < 1 ? "<1%" : `${percentVal.toFixed(1)}%`;
-                const barWidth = Math.min(100, percentVal);
-                html += `
-                  <div class="list-group-item d-flex justify-content-between align-items-center">
-                    <span>${system} <small class="text-muted">(${count})</small></span>
-                    <div class="d-flex align-items-center gap-2">
-                      <div class="progress" style="width: 100px; height: 20px;">
-                        <div class="progress-bar" style="width: ${barWidth}%" role="progressbar">${count}</div>
-                      </div>
-                      <small class="text-muted">${displayPercent}</small>
-                    </div>
-                  </div>
-                `;
-              });
-              html += "</div>";
-              gamesBySystem.innerHTML = html;
-            }
+            // Library report
+            const systems = Object.entries(data.detection.games_by_system);
+            renderBarChart(
+              document.getElementById("gamesBySystem"),
+              "Games by system",
+              countRows(topWithOther(systems, 12), data.detection.total_games, "games"),
+              { emptyText: 'No games found yet. Click "Scan Games" to scan your collection.' },
+            );
+            renderCoverage(
+              document.getElementById("libraryEsdeMedia"),
+              document.getElementById("librarySteamMedia"),
+              data.detection.media,
+            );
 
             // Update API status
             const apiStatus = document.getElementById("apiStatus");
@@ -488,16 +630,327 @@ dats/
         }
       }
 
-      // Update progress bar
-      setInterval(() => {
-        fetch("/status")
+      // ---- Report charts -------------------------------------------------
+      const MEDIA_LABELS = {
+        covers: "Covers",
+        screenshots: "Screenshots",
+        titlescreens: "Title screens",
+        marquees: "Marquees (logos)",
+        fanart: "Fan art",
+        backcovers: "Back covers",
+        "3dboxes": "3D boxes",
+        physicalmedia: "Physical media",
+        miximages: "Miximages",
+        videos: "Videos",
+        manuals: "Manuals",
+        steam_tall: "Library capsule",
+        steam_long: "Wide capsule",
+        steam_hero: "Hero banner",
+        steam_logo: "Logo",
+        steam_icon: "Icon",
+      };
+      const ESDE_MEDIA = [
+        "covers", "screenshots", "titlescreens", "marquees", "fanart", "backcovers",
+        "3dboxes", "physicalmedia", "miximages", "videos", "manuals",
+      ];
+      const STEAM_MEDIA = ["steam_tall", "steam_long", "steam_hero", "steam_logo", "steam_icon"];
+
+      function el(tag, className, text) {
+        const node = document.createElement(tag);
+        if (className) node.className = className;
+        if (text !== undefined) node.textContent = text;
+        return node;
+      }
+
+      // Keep the biggest entries and fold the rest into one "Other" bar
+      function topWithOther(entries, limit) {
+        if (entries.length <= limit) return entries;
+        const rest = entries.slice(limit - 1);
+        const restTotal = rest.reduce((sum, [, count]) => sum + count, 0);
+        return [...entries.slice(0, limit - 1), [`Other (${rest.length} systems)`, restTotal]];
+      }
+
+      function countRows(entries, total, noun) {
+        return entries.map(([label, count]) => ({
+          label,
+          value: count,
+          valueText: String(count),
+          tip: total
+            ? `${label}: ${count} ${noun} (${Math.round((count / total) * 100)}%)`
+            : `${label}: ${count} ${noun}`,
+        }));
+      }
+
+      function coverageRows(media, types) {
+        return types.map((type) => {
+          const count = media.by_type[type] || 0;
+          const percent = Math.round((count / media.total) * 100);
+          return {
+            label: MEDIA_LABELS[type],
+            value: percent,
+            valueText: `${percent}%`,
+            tip: `${MEDIA_LABELS[type]}: ${count} of ${media.total} games`,
+          };
+        });
+      }
+
+      // Horizontal bars: one hue, value at the bar's tip, details on hover or
+      // focus, and the same numbers as a table for screen readers and copying
+      function renderBarChart(container, title, rows, { max, emptyText } = {}) {
+        container.replaceChildren(el("h6", "chart-title", title));
+        if (!rows.length) {
+          container.append(el("p", "text-body-secondary small mb-0", emptyText));
+          return;
+        }
+
+        const scale = max || Math.max(...rows.map((row) => row.value)) || 1;
+        const list = el("div", "bar-chart");
+        list.setAttribute("role", "list");
+        list.setAttribute("aria-label", title);
+
+        for (const row of rows) {
+          const item = el("div", "bar-row");
+          item.setAttribute("role", "listitem");
+          item.tabIndex = 0;
+          item.dataset.tip = row.tip;
+          item.setAttribute("aria-label", row.tip);
+
+          const label = el("span", "bar-label", row.label);
+          label.title = row.label;
+          const track = el("span", "bar-track");
+          const bar = el("span", "bar");
+          bar.style.setProperty("--fraction", row.value / scale);
+          track.append(bar, el("span", "bar-value", row.valueText));
+          item.append(label, track);
+          list.append(item);
+        }
+
+        const details = el("details", "chart-table mt-2");
+        details.append(el("summary", "small text-body-secondary", "Show as table"));
+        const table = el("table", "table table-sm mb-0");
+        const body = el("tbody");
+        for (const row of rows) {
+          const tr = el("tr");
+          tr.append(el("th", "fw-normal", row.label), el("td", "text-end", row.tip.split(": ").slice(1).join(": ")));
+          body.append(tr);
+        }
+        table.append(body);
+        details.append(table);
+
+        container.append(list, details);
+      }
+
+      function renderCoverage(esdeContainer, steamContainer, media, emptyText) {
+        if (!media || !media.total) {
+          const text = emptyText || "Scan your games to see which images and videos they have.";
+          renderBarChart(esdeContainer, "Images and videos in ES-DE", [], { emptyText: text });
+          steamContainer.replaceChildren();
+          return;
+        }
+        renderBarChart(esdeContainer, "Images and videos in ES-DE", coverageRows(media, ESDE_MEDIA), { max: 100 });
+        renderBarChart(steamContainer, "Artwork for Steam", coverageRows(media, STEAM_MEDIA), { max: 100 });
+      }
+
+      let lastReport = null;
+
+      function renderReport(report) {
+        const section = document.getElementById("reportSection");
+        if (!report) {
+          section.classList.add("d-none");
+          lastReport = null;
+          return;
+        }
+        const key = JSON.stringify(report);
+        if (key === lastReport) return;
+        lastReport = key;
+        section.classList.remove("d-none");
+
+        const organised = report.outcomes.Organised;
+        const finished = new Date(report.finished).toLocaleTimeString();
+        document.getElementById("reportTitle").textContent = report.dry_run
+          ? "📈 Dry run report"
+          : "📈 Run report";
+        document.getElementById("reportSummary").textContent =
+          `${organised} ${organised === 1 ? "file" : "files"} ${report.dry_run ? "would be organised" : "organised"}` +
+          ` · ${report.dat_matches} matched a DAT · finished ${finished}`;
+
+        const outcomes = Object.entries(report.outcomes);
+        const files = outcomes.reduce((sum, [, count]) => sum + count, 0);
+        renderBarChart(
+          document.getElementById("reportOutcomes"),
+          "What happened to each file",
+          countRows(outcomes, files, "files"),
+          { emptyText: "No ROM files were found in the import folder." },
+        );
+
+        const systems = Object.entries(report.by_system);
+        const games = systems.reduce((sum, [, count]) => sum + count, 0);
+        renderBarChart(
+          document.getElementById("reportSystems"),
+          report.dry_run ? "Games that would be organised, by system" : "Games organised, by system",
+          countRows(topWithOther(systems, 12), games, "games"),
+          { emptyText: "No games were organised." },
+        );
+
+        renderCoverage(
+          document.getElementById("reportEsdeMedia"),
+          document.getElementById("reportSteamMedia"),
+          report.media,
+          report.dry_run ? "Images are downloaded on a real run, not a dry run." : undefined,
+        );
+
+        const unsorted = document.getElementById("reportUnsorted");
+        unsorted.replaceChildren();
+        if (report.unsorted_files.length) {
+          unsorted.append(
+            el("h6", "chart-title", "Left in the import folder"),
+            el("p", "small text-body-secondary mb-1",
+              "The app couldn't tell which system these are for. Put each in a folder named after its system (e.g. ps2/) and run again."),
+          );
+          const list = el("ul", "small mb-0");
+          for (const name of report.unsorted_files.slice(0, 50)) list.append(el("li", "", name));
+          if (report.unsorted_files.length > 50) {
+            list.append(el("li", "text-body-secondary", `and ${report.unsorted_files.length - 50} more (see the log)`));
+          }
+          unsorted.append(list);
+        }
+      }
+
+      // One tooltip for every chart, following the pointer or the focused bar
+      const chartTip = el("div", "chart-tip");
+      chartTip.setAttribute("aria-hidden", "true");
+      document.body.append(chartTip);
+
+      function showTip(row, x, y) {
+        chartTip.textContent = row.dataset.tip;
+        chartTip.style.left = `${Math.min(x + 12, window.innerWidth - chartTip.offsetWidth - 8)}px`;
+        chartTip.style.top = `${y + 12}px`;
+        chartTip.classList.add("is-visible");
+      }
+
+      document.addEventListener("mousemove", (event) => {
+        const row = event.target.closest(".bar-row");
+        if (row) showTip(row, event.clientX, event.clientY);
+        else chartTip.classList.remove("is-visible");
+      });
+      document.addEventListener("focusin", (event) => {
+        const row = event.target.closest(".bar-row");
+        if (!row) return;
+        const box = row.getBoundingClientRect();
+        showTip(row, box.left, box.bottom - 12);
+      });
+      document.addEventListener("focusout", () => chartTip.classList.remove("is-visible"));
+
+      function setupSteamRomManager() {
+        const message = document.getElementById("srmMessage");
+        message.textContent = "Updating Steam ROM Manager…";
+        fetch("/api/steam-rom-manager", { method: "POST" })
+          .then((r) => r.json())
+          .then((data) => {
+            message.textContent = data.error
+              ? `${data.error}. Is Steam ROM Manager installed?`
+              : `Done: ${data.updated.length} parsers now use this app's artwork (backup saved). ` +
+                "Open Steam ROM Manager, Parse, then Save to Steam.";
+          })
+          .catch((err) => (message.textContent = `Couldn't update Steam ROM Manager: ${err.message}`));
+      }
+
+      // Organise run: start it, then follow /status until it finishes
+      const PHASES = {
+        idle: "Idle",
+        starting: "Starting…",
+        organising: "Organising files",
+        scraping: "Scraping game data",
+        artwork: "Downloading covers",
+        done: "Finished",
+        failed: "Failed",
+      };
+      let wasRunning = false;
+
+      function updateRunButton() {
+        const btn = document.getElementById("organiseBtn");
+        const dryRun = document.getElementById("dryRun").checked;
+        btn.textContent = dryRun ? "Preview (dry run)" : "Organise and move files";
+        btn.classList.toggle("btn-primary", dryRun);
+        btn.classList.toggle("btn-danger", !dryRun);
+      }
+
+      function startOrganise(event) {
+        event.preventDefault();
+        document.getElementById("formMessage").classList.add("d-none");
+
+        fetch("/api/organise", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({
+            input_path: document.getElementById("inputPath").value,
+            rom_root: document.getElementById("romRoot").value,
+            dry_run: document.getElementById("dryRun").checked,
+          }),
+        })
+          .then(async (r) => {
+            const data = await r.json();
+            if (!r.ok) throw new Error(data.error || r.statusText);
+            pollStatus();
+          })
+          .catch((err) => showFormMessage(err.message, "danger"));
+      }
+
+      function pollStatus() {
+        fetch("/status", { cache: "no-store" })
           .then((r) => r.json())
           .then((data) => {
             const bar = document.getElementById("progressBar");
             bar.style.width = data.progress + "%";
-            bar.innerText = data.progress + "%";
-          });
-      }, 1000);
+            bar.textContent = data.progress + "%";
+            bar.classList.toggle("progress-bar-striped", data.running);
+            bar.classList.toggle("progress-bar-animated", data.running);
+            bar.classList.toggle("is-done", data.phase === "done");
+            bar.classList.toggle("is-failed", data.phase === "failed");
+
+            let phase = PHASES[data.phase] || data.phase;
+            if (data.phase === "organising" && data.files_total) {
+              phase += ` (${data.files_checked}/${data.files_total} files)`;
+            }
+            if (data.running && data.current_file) phase += ` · ${data.current_file}`;
+            if (data.phase !== "idle" && data.dry_run) phase += " · dry run";
+            document.getElementById("phaseText").textContent = phase;
+
+            const stats = {
+              statProcessed: data.roms_processed,
+              statDat: data.dat_matches,
+              statArtwork: data.artwork_downloads,
+              statDuplicates: data.duplicates,
+              statUnsorted: data.unsorted,
+              statSkipped: data.skipped,
+            };
+            for (const [id, value] of Object.entries(stats)) {
+              document.getElementById(id).textContent = value;
+            }
+
+            const log = document.getElementById("logOutput");
+            const atBottom = log.scrollTop + log.clientHeight >= log.scrollHeight - 20;
+            log.textContent = data.log.join("\n");
+            if (atBottom) log.scrollTop = log.scrollHeight;
+
+            document.getElementById("organiseBtn").disabled = data.running;
+            for (const id of ["inputPath", "romRoot", "dryRun"]) {
+              document.getElementById(id).disabled = data.running;
+            }
+
+            renderReport(data.report);
+
+            // Library counts change once a real run finishes
+            if (wasRunning && !data.running) updateStatusPanel();
+            wasRunning = data.running;
+          })
+          .catch((err) => console.error("Status poll error:", err));
+      }
+
+      updateRunButton();
+      loadSystems();
+      pollStatus();
+      setInterval(pollStatus, 1000);
     </script>
   </body>
 </html>

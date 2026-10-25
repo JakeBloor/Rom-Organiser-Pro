@@ -4,6 +4,9 @@ Uses pytest-bdd for behavior-driven testing
 """
 
 from pathlib import Path
+import re
+import zipfile
+
 import pytest
 from pytest_bdd import given, scenario, then, when, parsers
 
@@ -116,6 +119,91 @@ def test_arcade_priority(rom_context):
     pass
 
 
+@scenario(
+    "../features/detection.feature",
+    "PS4 ROM with folder hint and ambiguous ISO extension",
+)
+def test_ambiguous_ps4_iso(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "PS5 ROM with folder hint and ambiguous ISO extension",
+)
+def test_ambiguous_ps5_iso(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "PS4 ROM with folder hint and ambiguous PKG extension",
+)
+def test_ambiguous_ps4_pkg(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "PS5 ROM with folder hint and ambiguous PKG extension",
+)
+def test_ambiguous_ps5_pkg(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "SNES archive in snes folder is not detected as NES",
+)
+def test_whole_folder_snes(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "GBA archive in gba folder is not detected as Game Boy",
+)
+def test_whole_folder_gba(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "Arcade in a file name does not make it an arcade ROM",
+)
+def test_arcade_keyword_in_filename(rom_context):
+    pass
+
+
+@scenario("../features/detection.feature", "Folder names with spaces match folder hints")
+def test_folder_hint_with_spaces(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "Files that aren't ROMs for any system are not detected",
+)
+def test_non_roms_not_detected(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "Ambiguous files outside system folders are guessed only when allowed",
+)
+def test_guessing_only_when_allowed(rom_context):
+    pass
+
+
+@scenario(
+    "../features/detection.feature",
+    "Zips whose contents don't decide a system are not sorted",
+)
+def test_undecided_zips_not_sorted(rom_context):
+    pass
+
+
 @scenario("../features/detection.feature", "System priority configuration is complete")
 def test_priority_configuration(rom_context):
     pass
@@ -133,6 +221,16 @@ def rom_with_path(rom_context, path):
     rom_context["rom_path"] = Path(path)
 
 
+@given(parsers.parse("a zip on disk holding {contents}"))
+def zip_on_disk(rom_context, tmp_path, contents):
+    path = tmp_path / "downloads" / "game.zip"
+    path.parent.mkdir()
+    with zipfile.ZipFile(path, "w") as zf:
+        for member in re.findall(r'"([^"]+)"', contents):
+            zf.writestr(member, b"rom data")
+    rom_context["rom_path"] = path
+
+
 # When steps
 @when("the system detection runs")
 def system_detection_runs(rom_context):
@@ -141,6 +239,11 @@ def system_detection_runs(rom_context):
     if rom_path is None:
         raise ValueError("ROM path not set in context")
     rom_context["detected_system"] = detect_system(rom_path)
+
+
+@when("the system detection runs without guessing")
+def system_detection_runs_without_guessing(rom_context):
+    rom_context["detected_system"] = detect_system(rom_context["rom_path"], allow_guess=False)
 
 
 @when("checking system priority configuration")
@@ -173,6 +276,11 @@ def detected_system_should_be(rom_context, expected):
     """Assert the detected system matches expected"""
     detected = rom_context.get("detected_system")
     assert detected == expected, f"Expected {expected}, but got {detected}"
+
+
+@then("no system should be detected")
+def no_system_detected(rom_context):
+    assert rom_context["detected_system"] is None
 
 
 @then("system priority should not be empty")

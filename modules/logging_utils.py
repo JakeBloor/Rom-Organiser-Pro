@@ -32,6 +32,9 @@ LOG_ICONS = {
 class AppLogger:
     """Logger wrapper that stores messages in memory for web interface"""
 
+    # The log file keeps everything; memory only holds the most recent lines
+    MAX_MESSAGES = 5000
+
     def __init__(self):
         self.messages = []
 
@@ -40,6 +43,8 @@ class AppLogger:
         icon = LOG_ICONS.get(level, '📝')
         formatted_message = f"{icon} {message}"
         self.messages.append(formatted_message)
+        if len(self.messages) > self.MAX_MESSAGES:
+            del self.messages[:-self.MAX_MESSAGES]
 
         if level == 'INFO':
             logger.info(message)

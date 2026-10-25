@@ -1,36 +1,57 @@
+import os
+import threading
+from collections import Counter
+
 from flask import Flask, render_template, request, jsonify
 from pathlib import Path
 from datetime import datetime
-from collections import defaultdict
 
+from modules import esde, settings
+from modules.artwork import fetch_artwork
+from modules.library import list_library, system_folders
+from modules.media import media_coverage, steam_artwork_root
+from modules.srm import configure_srm
 from modules.organizer import process_roms
 from modules.scraper import run_skyscraper
 from modules.logging_utils import AppLogger
-from modules.detection import detect_system
 from modules.dat_validation import fetch_latest_dats, load_dat_files
-from config import (
-    DAT_DIR,
-    EMUDECK_ROOT,
-    SYSTEM_MAP,
-    ENABLE_STEAMGRIDDB,
-    STEAMGRIDDB_API,
-    ENABLE_SCREENSCRAPER,
-    SCREENSCRAPER_USER,
-    SCREENSCRAPER_PASSWORD,
-)
+from config import DAT_DIR, SYSTEM_MAP
 
 app = Flask(__name__)
 
-# Replace log_output list and logger function with:
 app_logger = AppLogger()
 
+# Log lines sent to the page with each status poll
+LOG_TAIL = 500
+
+STATUS_COUNTERS = (
+    "roms_processed",
+    "duplicates",
+    "dat_matches",
+    "artwork_downloads",
+    "unsorted",
+    "skipped",
+)
+
+# Live state of the current (or last) organise run, polled by the page
 status = {
+    "running": False,
+    "phase": "idle",
+    "dry_run": True,
     "progress": 0,
-    "roms_processed": 0,
-    "duplicates": 0,
-    "dat_matches": 0,
-    "artwork_downloads": 0,
+    "files_total": 0,
+    "files_checked": 0,
+    "current_file": "",
+    **{counter: 0 for counter in STATUS_COUNTERS},
+    # Images saved this run, per media type ("covers", "steam_tall", ...)
+    "media_downloads": {},
+    "unsorted_files": [],
+    # Summary shown on the page once a run finishes
+    "report": None,
 }
+
+# Only one organise run at a time
+organise_lock = threading.Lock()
 
 # Detection statistics tracking
 detection_stats = {
@@ -39,14 +60,53 @@ detection_stats = {
     "last_scan": None,
     "supported_systems": len(SYSTEM_MAP),
     "undetected_files": [],
+    "media": None,
+    # Systems the last scan was limited to; None means all of them
+    "scanned_systems": None,
 }
+
+
+def update_detection_stats(rom_root, systems=None):
+    games, undetected = list_library(rom_root, systems)
+    detection_stats["games_by_system"] = dict(
+        Counter(system for system, _ in games).most_common()
+    )
+    detection_stats["undetected_files"] = undetected
+    detection_stats["total_games"] = len(games)
+    detection_stats["media"] = media_coverage(games, esde.media_root(), steam_artwork_root())
+    detection_stats["scanned_systems"] = sorted(systems) if systems else None
+    detection_stats["last_scan"] = datetime.now().isoformat()
+
+
+def build_report(placed, dry_run):
+    """Summary of a finished organise run for the page's report charts."""
+    return {
+        "dry_run": dry_run,
+        "finished": datetime.now().isoformat(),
+        "outcomes": {
+            "Organised": status["roms_processed"],
+            "Unsorted": status["unsorted"],
+            "Skipped": status["skipped"],
+            "Duplicates": status["duplicates"],
+        },
+        "dat_matches": status["dat_matches"],
+        "by_system": dict(Counter(game["system"] for game in placed).most_common()),
+        "unsorted_files": list(status["unsorted_files"]),
+        "media": None
+        if dry_run
+        else media_coverage(
+            [(game["system"], game["path"]) for game in placed],
+            esde.media_root(),
+            steam_artwork_root(),
+        ),
+    }
 
 
 @app.route("/api/status")
 def api_status():
     """Return comprehensive status of API connections, DAT files, and detection stats"""
     try:
-        # Get environment-based API configuration
+        # Library stats, API connections and DAT files on disk
         api_status_data = {
             "timestamp": datetime.now().isoformat(),
             "detection": {
@@ -54,17 +114,22 @@ def api_status():
                 "supported_systems": detection_stats["supported_systems"],
                 "detected_systems": len(detection_stats["games_by_system"]),
                 "games_by_system": detection_stats["games_by_system"],
+                "media": detection_stats["media"],
                 "last_scan": detection_stats["last_scan"],
+                "scanned_systems": detection_stats["scanned_systems"],
                 "undetected_count": len(detection_stats["undetected_files"]),
             },
             "apis": {
                 "steamgriddb": {
-                    "enabled": bool(ENABLE_STEAMGRIDDB),
-                    "configured": bool(STEAMGRIDDB_API),
+                    "enabled": settings.get("enable_steamgriddb"),
+                    "configured": bool(settings.get("steamgriddb_api")),
                 },
                 "screenscraper": {
-                    "enabled": bool(ENABLE_SCREENSCRAPER),
-                    "configured": bool(SCREENSCRAPER_USER and SCREENSCRAPER_PASSWORD),
+                    "enabled": settings.get("enable_screenscraper"),
+                    "configured": bool(
+                        settings.get("screenscraper_user")
+                        and settings.get("screenscraper_password")
+                    ),
                 },
             },
             "dats": {"directory": str(DAT_DIR), "total_files": 0, "files": []},
@@ -96,72 +161,50 @@ def api_status():
 
 @app.route("/status")
 def get_status():
-    return jsonify(status)
+    messages = app_logger.get_messages()
+    return jsonify({**status, "log": messages[-LOG_TAIL:], "log_total": len(messages)})
 
 
 @app.route("/api/scan-games", methods=["POST"])
 def scan_games():
-    """Scan EmuDeck ROM directory and detect all games by system"""
+    """Scan the ROM library and count games by system"""
     try:
-        detection_stats["games_by_system"] = defaultdict(int)
-        detection_stats["undetected_files"] = []
-
         body = request.get_json(silent=True) or {}
-        scan_root = (
-            Path(body.get("emudeck_path", ""))
-            if body.get("emudeck_path")
-            else EMUDECK_ROOT
-        )
+        requested = body.get("rom_root") or body.get("emudeck_path")
+        scan_root = Path(requested) if requested else esde.rom_root()
+        systems = body.get("systems") or None
 
-        if not scan_root.exists():
+        if systems is not None and (
+            not isinstance(systems, list) or not all(isinstance(s, str) for s in systems)
+        ):
+            return (
+                jsonify({"success": False, "error": "systems must be a list of system names"}),
+                400,
+            )
+
+        if not scan_root.is_dir():
             return (
                 jsonify(
                     {
                         "success": False,
-                        "error": f"EmuDeck directory not found: {scan_root}",
+                        "error": f"ROM folder not found: {scan_root}",
                         "stats": detection_stats,
                     }
                 ),
                 404,
             )
 
-        # Scan all ROM files
-        game_count = 0
-        undetected_count = 0
-
-        for rom_file in scan_root.rglob("*"):
-            if rom_file.is_file():
-                # Detect system for this ROM
-                system = detect_system(str(rom_file))
-
-                if system:
-                    if system not in detection_stats["games_by_system"]:
-                        detection_stats["games_by_system"][system] = 0
-                    detection_stats["games_by_system"][system] += 1
-                    game_count += 1
-                else:
-                    detection_stats["undetected_files"].append(rom_file.name)
-                    undetected_count += 1
-
-        # Sort by count descending
-        detection_stats["games_by_system"] = dict(
-            sorted(
-                detection_stats["games_by_system"].items(),
-                key=lambda x: x[1],
-                reverse=True,
-            )
-        )
-
-        detection_stats["total_games"] = game_count
-        detection_stats["last_scan"] = datetime.now().isoformat()
+        update_detection_stats(scan_root, systems)
 
         return jsonify(
             {
                 "success": True,
-                "total_games": game_count,
-                "undetected": undetected_count,
+                "scanned_systems": detection_stats["scanned_systems"],
+                "total_games": detection_stats["total_games"],
+                "undetected": len(detection_stats["undetected_files"]),
                 "systems_detected": len(detection_stats["games_by_system"]),
-                "games_by_system": dict(detection_stats["games_by_system"]),
+                "games_by_system": detection_stats["games_by_system"],
+                "media": detection_stats["media"],
                 "timestamp": detection_stats["last_scan"],
             }
         )
@@ -171,40 +214,176 @@ def scan_games():
         return jsonify({"success": False, "error": str(e)}), 500
 
 
-@app.route("/", methods=["GET", "POST"])
-def index():
-    if request.method == "POST":
-        app_logger.clear()  # Changed from log_output = []
+@app.route("/api/systems")
+def list_systems():
+    """The system folders in a ROM folder, for choosing which ones to scan"""
+    requested = request.args.get("rom_root")
+    rom_root = Path(requested) if requested else esde.rom_root()
 
-        status["progress"] = 0
-        status["roms_processed"] = 0
-        status["duplicates"] = 0
-        status["dat_matches"] = 0
-        status["artwork_downloads"] = 0
+    if not rom_root.is_dir():
+        return jsonify({"systems": [], "error": f"ROM folder not found: {rom_root}"}), 404
 
-        input_path = request.form["input_path"]
+    return jsonify({"systems": system_folders(rom_root)})
 
-        systems = process_roms(
-            input_path, app_logger.log, status  # Changed from logger
+
+def run_organise(input_path, rom_root, dry_run):
+    """Organise, then scrape game data and download covers. Runs in a worker thread."""
+    try:
+        status["phase"] = "organising"
+        placed = process_roms(
+            input_path, app_logger.log, status, dry_run=dry_run, rom_root=rom_root
         )
 
-        for system in systems:
-            run_skyscraper(system, app_logger.log)  # Changed from logger
+        if dry_run:
+            app_logger.info("Dry run: no files were moved, nothing was scraped")
+        elif placed:
+            systems = sorted({game["system"] for game in placed})
 
+            status["phase"] = "scraping"
+            for index, system in enumerate(systems):
+                status["progress"] = int(index * 100 / len(systems))
+                status["current_file"] = system
+                if run_skyscraper(system, app_logger.log, rom_root) is None:
+                    break
+
+            status["phase"] = "artwork"
+            media_root = esde.media_root()
+            steam_root = steam_artwork_root()
+            for index, game in enumerate(placed):
+                status["progress"] = int(index * 100 / len(placed))
+                status["current_file"] = Path(game["path"]).name
+                saved = fetch_artwork(game, media_root, steam_root, app_logger.log)
+                if saved:
+                    status["artwork_downloads"] += 1
+                for media_type in saved:
+                    downloads = status["media_downloads"]
+                    downloads[media_type] = downloads.get(media_type, 0) + 1
+
+            update_detection_stats(rom_root)
+
+        status["report"] = build_report(placed, dry_run)
+        status["phase"] = "done"
         status["progress"] = 100
+        app_logger.success(
+            f"COMPLETE: {status['roms_processed']} games "
+            f"{'would be ' if dry_run else ''}organised, "
+            f"{status['unsorted']} unsorted, {status['skipped']} skipped, "
+            f"{status['duplicates']} duplicates"
+        )
 
-        app_logger.success("COMPLETE")  # Changed from logger()
+    except Exception as e:
+        status["phase"] = "failed"
+        app_logger.error(f"Organise failed: {e}")
 
+    finally:
+        status["running"] = False
+        status["current_file"] = ""
+        organise_lock.release()
+
+
+@app.route("/api/organise", methods=["POST"])
+def start_organise():
+    body = request.get_json(silent=True) or {}
+    input_path = str(body.get("input_path", "")).strip()
+    rom_root = str(body.get("rom_root", "")).strip() or str(esde.rom_root())
+    dry_run = bool(body.get("dry_run", True))
+
+    # An empty path would resolve to the app's own folder
+    if not input_path or not Path(input_path).is_dir():
+        return jsonify({"error": f"Import folder not found: {input_path or '(empty)'}"}), 400
+
+    if not Path(rom_root).is_dir():
+        return jsonify({"error": f"ROM folder not found: {rom_root}"}), 400
+
+    if not organise_lock.acquire(blocking=False):
+        return jsonify({"error": "An organise run is already in progress"}), 409
+
+    app_logger.clear()
+    status.update(
+        running=True,
+        phase="starting",
+        dry_run=dry_run,
+        progress=0,
+        files_total=0,
+        files_checked=0,
+        current_file="",
+        media_downloads={},
+        unsorted_files=[],
+        report=None,
+        **{counter: 0 for counter in STATUS_COUNTERS},
+    )
+    app_logger.info(
+        f"{'Dry run' if dry_run else 'Organising'}: {input_path} -> {rom_root}"
+    )
+
+    threading.Thread(
+        target=run_organise, args=(input_path, rom_root, dry_run), daemon=True
+    ).start()
+
+    return jsonify({"started": True}), 202
+
+
+@app.route("/api/steam-rom-manager", methods=["POST"])
+def setup_steam_rom_manager():
+    """Point Steam ROM Manager's parsers at the app's Steam artwork."""
+    result = configure_srm(steam_artwork_root(), app_logger.log)
+    return jsonify(result), 404 if "error" in result else 200
+
+
+@app.route("/")
+def index():
     return render_template(
         "index.html",
-        log="\n".join(app_logger.get_messages()),  # Changed from log_output
-        progress=status["progress"],
-        roms_processed=status["roms_processed"],
-        duplicates=status["duplicates"],
-        dat_matches=status["dat_matches"],
-        artwork_downloads=status["artwork_downloads"],
-        detection_stats=detection_stats,
+        rom_root=esde.rom_root(),
+        status=status,
     )
+
+
+# Server settings only change when the app restarts
+SERVER_SETTINGS_AT_START = {
+    field.key: settings.get(field.key) for field in settings.FIELDS if field.restart
+}
+
+
+def settings_response():
+    return {
+        "settings": settings.public_values(),
+        "restart_needed": any(
+            settings.get(key) != value for key, value in SERVER_SETTINGS_AT_START.items()
+        ),
+        "load_error": settings.load_error,
+    }
+
+
+@app.route("/settings")
+def settings_page():
+    groups = {}
+    for field in settings.FIELDS:
+        groups.setdefault(field.group, []).append(field)
+    return render_template("settings.html", groups=groups, **settings_response())
+
+
+@app.route("/api/settings", methods=["GET", "POST"])
+def api_settings():
+    """Read the settings, or save changes to them"""
+    if request.method == "GET":
+        return jsonify(settings_response())
+
+    body = request.get_json(silent=True)
+    if not isinstance(body, dict):
+        return jsonify({"errors": {"": "Send the settings as a JSON object."}}), 400
+
+    try:
+        errors = settings.save(body)
+    except OSError as e:
+        app_logger.error(f"Couldn't save settings: {e}")
+        return jsonify({"errors": {"": f"Couldn't save settings: {e}"}}), 500
+
+    if errors:
+        return jsonify({"errors": errors}), 400
+
+    app_logger.info("Settings saved")
+    return jsonify({"saved": True, **settings_response()})
 
 
 @app.route("/logs")
@@ -213,11 +392,13 @@ def view_logs():
 
 
 def initialize_dat_files():
+    if settings.load_error:
+        app_logger.warning(settings.load_error)
+
     # Attempt to fetch DATs from libretro first, fall back to local DATs
     try:
         app_logger.info("Initializing DAT files: fetching latest DATs if available...")
-        results = fetch_latest_dats(app_logger.log)
-        # If fetch_latest_dats loaded DATs it will have called load_dat_files; ensure local load as well
+        fetch_latest_dats(app_logger.log)
         load_dat_files(app_logger.log)
         app_logger.success("DAT initialization complete (libretro/local fallback)")
     except Exception as e:
@@ -226,37 +407,24 @@ def initialize_dat_files():
     # Scan for games on startup (now with DATs loaded if available)
     try:
         app_logger.info("Scanning for games...")
-        if EMUDECK_ROOT.exists():
-            for rom_file in EMUDECK_ROOT.rglob("*"):
-                if rom_file.is_file():
-                    system = detect_system(str(rom_file))
-                    if system:
-                        detection_stats["games_by_system"].setdefault(system, 0)
-                        detection_stats["games_by_system"][system] += 1
-                    else:
-                        detection_stats["undetected_files"].append(rom_file.name)
-
-            detection_stats["total_games"] = sum(
-                detection_stats["games_by_system"].values()
-            )
-            detection_stats["last_scan"] = datetime.now().isoformat()
-
-            # Sort by count
-            detection_stats["games_by_system"] = dict(
-                sorted(
-                    detection_stats["games_by_system"].items(),
-                    key=lambda x: x[1],
-                    reverse=True,
-                )
-            )
-
+        rom_root = esde.rom_root()
+        if rom_root.is_dir():
+            update_detection_stats(rom_root)
             app_logger.success(
                 f"Found {detection_stats['total_games']} games across {len(detection_stats['games_by_system'])} systems"
+            )
+        else:
+            app_logger.warning(
+                f"ROM folder not found: {rom_root}; skipping startup scan"
             )
     except Exception as e:
         app_logger.error(f"Game scan on startup failed: {e}")
 
 
 if __name__ == "__main__":
-    initialize_dat_files()
-    app.run(host="0.0.0.0", port=8181, debug=True)
+    # The debug reloader runs this module twice: once in a watcher process and
+    # again in the child that serves requests. Only the child needs the DATs.
+    debug = settings.get("debug")
+    if not debug or os.environ.get("WERKZEUG_RUN_MAIN") == "true":
+        initialize_dat_files()
+    app.run(host=settings.get("host"), port=settings.get("port"), debug=debug)

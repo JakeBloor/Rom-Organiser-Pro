@@ -1,60 +1,185 @@
-import requests
+import re
 from pathlib import Path
+from urllib.parse import quote
 
-from config import (
-    STEAMGRIDDB_API,
-    ENABLE_STEAMGRIDDB
+import requests
+
+from config import DAT_SYSTEM_IDS
+from modules import settings
+from modules.detection import clean_name
+from modules.media import (
+    STEAM_IMAGE_TYPES,
+    esde_media_path,
+    has_esde_media,
+    has_steam_artwork,
+    steam_artwork_path,
 )
 
-def fetch_artwork(game_name, folder, logger, status=None):
-    if not ENABLE_STEAMGRIDDB:
-        return
+API_BASE = "https://www.steamgriddb.com/api/v2"
+LIBRETRO_BASE = "https://thumbnails.libretro.com"
 
-    if not STEAMGRIDDB_API:
+# ES-DE media folder -> libretro thumbnail folder
+LIBRETRO_TYPES = {
+    "covers": "Named_Boxarts",
+    "screenshots": "Named_Snaps",
+    "titlescreens": "Named_Titles",
+}
+# libretro replaces these characters in game names with "_"
+LIBRETRO_UNSAFE = re.compile(r"[&*/:`<>?\\|]")
+# A system's libretro folder when the game didn't match a DAT: the first DAT
+# name mapped to it, e.g. "nds" -> "Nintendo - Nintendo DS"
+LIBRETRO_SYSTEM_NAMES = {
+    system: name for name, system in reversed(list(DAT_SYSTEM_IDS.items()))
+}
+
+# Steam ROM Manager image kind -> SteamGridDB endpoint and filters
+STEAMGRIDDB_QUERIES = {
+    "tall": ("grids", {"dimensions": "600x900", "mimes": "image/png,image/jpeg"}),
+    "long": ("grids", {"dimensions": "920x430,460x215", "mimes": "image/png,image/jpeg"}),
+    "hero": ("heroes", {"mimes": "image/png,image/jpeg"}),
+    "logo": ("logos", {"mimes": "image/png"}),
+    "icon": ("icons", {"mimes": "image/png"}),
+}
+# ES-DE media also filled from SteamGridDB when libretro has nothing
+STEAMGRIDDB_FOR_ESDE = {"covers": "tall", "marquees": "logo", "fanart": "hero"}
+
+
+def _suffix(url):
+    return ".jpg" if Path(url.split("?")[0]).suffix.lower() in (".jpg", ".jpeg") else ".png"
+
+
+def _save(path, content):
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(content)
+
+
+def _fetch_libretro(game, media_root, logger):
+    folder = game.get("dat_title") or LIBRETRO_SYSTEM_NAMES.get(game["system"])
+    if not folder:
+        return []
+
+    saved = []
+
+    for media_type, thumbnail_kind in LIBRETRO_TYPES.items():
+        if has_esde_media(media_root, game["system"], game["path"], media_type):
+            continue
+
+        for name in game["names"]:
+            url = (
+                f"{LIBRETRO_BASE}/{quote(folder)}/{thumbnail_kind}/"
+                f"{quote(LIBRETRO_UNSAFE.sub('_', name))}.png"
+            )
+            try:
+                response = requests.get(url, timeout=15)
+            except requests.RequestException as e:
+                logger(f"[ARTWORK ERROR] libretro thumbnails: {e}", "WARNING")
+                return saved
+
+            if response.status_code == 200:
+                _save(
+                    esde_media_path(media_root, game["system"], game["path"], media_type, ".png"),
+                    response.content,
+                )
+                saved.append(media_type)
+                break
+
+    if saved:
+        logger(f"[ARTWORK] libretro {', '.join(saved)} for {game['names'][0]}")
+    return saved
+
+
+def _fetch_steamgriddb(game, media_root, steam_root, logger):
+    system, game_path = game["system"], game["path"]
+
+    steam_wanted = [
+        kind for kind in STEAM_IMAGE_TYPES
+        if not has_steam_artwork(steam_root, system, game_path, kind)
+    ]
+    esde_wanted = {
+        media_type: kind for media_type, kind in STEAMGRIDDB_FOR_ESDE.items()
+        if not has_esde_media(media_root, system, game_path, media_type)
+    }
+    kinds = [k for k in STEAM_IMAGE_TYPES if k in steam_wanted or k in esde_wanted.values()]
+    if not kinds:
+        return []
+
+    api_key = settings.get("steamgriddb_api")
+    if not api_key:
         logger("[ARTWORK] Missing SteamGridDB API key")
-        return
+        return []
 
-    cover = folder / "cover.png"
-
-    if cover.exists():
-        return
+    search_name = clean_name(game["title"])
+    headers = {"Authorization": f"Bearer {api_key}"}
+    saved = []
 
     try:
-        headers = {
-            "Authorization": f"Bearer {STEAMGRIDDB_API}"
-        }
-
         search = requests.get(
-            f"https://www.steamgriddb.com/api/v2/search/autocomplete/{game_name}",
-            headers=headers
-        ).json()
+            f"{API_BASE}/search/autocomplete/{quote(search_name, safe='')}",
+            headers=headers,
+            timeout=15,
+        )
+        search.raise_for_status()
+        results = search.json().get("data") or []
 
-        if not search.get("data"):
-            logger(f"[ARTWORK] No results for {game_name}")
-            return
+        if not results:
+            logger(f"[ARTWORK] No results for {search_name}")
+            return []
 
-        game_id = search["data"][0]["id"]
+        game_id = results[0]["id"]
 
-        grids = requests.get(
-            f"https://www.steamgriddb.com/api/v2/grids/game/{game_id}",
-            headers=headers
-        ).json().get("data", [])
+        for kind in kinds:
+            endpoint, params = STEAMGRIDDB_QUERIES[kind]
+            listing = requests.get(
+                f"{API_BASE}/{endpoint}/game/{game_id}",
+                headers=headers,
+                params={**params, "types": "static"},
+                timeout=15,
+            )
+            listing.raise_for_status()
+            images = listing.json().get("data") or []
 
-        if not grids:
-            logger(f"[ARTWORK] No grids found for {game_name}")
-            return
+            if not images:
+                continue
 
-        img_url = grids[0]["url"]
+            img_url = images[0]["url"]
+            img = requests.get(img_url, timeout=30)
+            img.raise_for_status()
+            suffix = _suffix(img_url)
 
-        img = requests.get(img_url).content
+            if kind in steam_wanted:
+                _save(steam_artwork_path(steam_root, system, game_path, kind, suffix), img.content)
+                saved.append(f"steam_{kind}")
 
-        with open(cover, "wb") as f:
-            f.write(img)
+            for media_type, source_kind in esde_wanted.items():
+                if source_kind == kind:
+                    _save(esde_media_path(media_root, system, game_path, media_type, suffix), img.content)
+                    saved.append(media_type)
 
-        if status:
-            status["artwork_downloads"] += 1
+    except (requests.RequestException, ValueError, KeyError) as e:
+        logger(f"[ARTWORK ERROR] {search_name}: {e}", "WARNING")
+        return saved
 
-        logger(f"[ARTWORK] Downloaded for {game_name}")
+    if saved:
+        logger(f"[ARTWORK] SteamGridDB {', '.join(saved)} for {search_name}")
+    else:
+        logger(f"[ARTWORK] No SteamGridDB images found for {search_name}")
+    return saved
 
-    except Exception as e:
-        logger(f"[ARTWORK ERROR] {e}")
+
+def fetch_artwork(game, media_root, steam_root, logger):
+    """
+    Download any missing images for a placed game (see process_roms): ES-DE
+    covers, screenshots and title screens from libretro's thumbnails, which
+    match DAT names exactly, then SteamGridDB for anything still missing plus
+    ES-DE marquees and fan art and the five Steam ROM Manager image kinds.
+    Existing images are never replaced. Returns the media types saved.
+    """
+    saved = []
+
+    if settings.get("enable_libretro_thumbnails"):
+        saved += _fetch_libretro(game, media_root, logger)
+
+    if settings.get("enable_steamgriddb"):
+        saved += _fetch_steamgriddb(game, media_root, steam_root, logger)
+
+    return saved
