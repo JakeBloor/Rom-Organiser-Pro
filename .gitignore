@@ -226,3 +226,6 @@ dats/libretro/
 
 # Secrets for settings.json: API keys and passwords
 settings.local.json
+
+# Checksums and outcomes the app remembers about ROM files
+cache/

@@ -6,11 +6,10 @@ The page uses a small JSON API, which you can call from scripts as well. The ser
 
 ### `POST /api/organise`
 
-Starts an organise run in the background.
+Starts an organise run in the background. By default it organises the new games in the ROM folder, the ones `GET /api/new-roms` lists, and leaves everything already in place alone.
 
 ```json
 {
-  "input_path": "/home/deck/Downloads/NewROMs",
   "rom_root": "/home/deck/Emulation/roms",
   "dry_run": true
 }
@@ -18,8 +17,8 @@ Starts an organise run in the background.
 
 | Field | Required | Notes |
 |---|---|---|
-| `input_path` | yes | Folder of new ROMs. |
 | `rom_root` | no | Defaults to ES-DE's ROM folder. |
+| `input_path` | no | Organise a separate folder of new ROMs into `rom_root` instead. Every ROM in it is moved. |
 | `dry_run` | no | Defaults to `true`. Send `false` to move files and download artwork. |
 
 | Status | Meaning |
@@ -28,18 +27,46 @@ Starts an organise run in the background.
 | `400` | The import folder or ROM folder doesn't exist. |
 | `409` | A run is already going. |
 
+### `POST /api/stop`
+
+Asks the current run to stop after the file, system or game it's on. Returns `202`, or `409` if no run is going. The run ends with phase `stopped` and a report of what it did.
+
+### `GET /api/new-roms?rom_root=<folder>`
+
+Checks the ROM folder for games that still need organising. `rom_root` defaults to ES-DE's ROM folder. While a run is going, the result of the last check is returned.
+
+```json
+{
+  "rom_root": "/home/deck/Emulation/roms",
+  "new": ["Chrono Trigger (USA).sfc", "New games/Tetris (World).gb"],
+  "needs_attention": [{"path": "Mystery Disc.iso", "reason": "unsorted"}],
+  "total": 3,
+  "all_organised": false,
+  "checked": "2026-10-25T14:05:00"
+}
+```
+
+- `new` lists games the app hasn't organised yet: ones in a system folder it hasn't handled, or that have changed since, plus anything outside the system folders.
+- `needs_attention` lists games an earlier run left in place, with the reason: `unsorted`, `skipped` or `duplicate`.
+- Paths are relative to the ROM folder.
+
+Returns `404` with an `error` field if the folder doesn't exist.
+
 ### `GET /status`
 
 The live state of the current or last run. The page asks for this every second.
 
 | Field | Meaning |
 |---|---|
-| `running`, `phase` | Whether a run is going, and its phase: `starting`, `organising`, `scraping`, `artwork`, `done` or `failed`. |
+| `running`, `phase` | Whether a run is going, and its phase: `starting`, `finding`, `organising`, `scraping`, `artwork`, `done`, `stopped` or `failed`. |
+| `current_detail` | What's happening right now, such as `"checking 1.2 GB of 4.3 GB"` or Skyscraper's latest line. |
+| `started_at`, `updated_at` | When the run started, and when progress last moved, in seconds since 1970. |
+| `cancel_requested` | `true` once a stop has been asked for. |
 | `dry_run` | Whether this is a dry run. |
 | `progress`, `files_total`, `files_checked`, `current_file` | Progress within the current phase. |
 | `roms_processed`, `dat_matches`, `duplicates`, `unsorted`, `skipped`, `artwork_downloads` | Counters. |
 | `media_downloads` | Images saved this run, by type, such as `{"covers": 3, "steam_tall": 3}`. |
-| `unsorted_files` | Names of the files left in the import folder. |
+| `unsorted_files` | Paths of the files left in place, relative to the folder being organised. |
 | `report` | The run report once the run finishes, otherwise `null` (see below). |
 | `log`, `log_total` | The last 500 log lines, and how many lines there are in total. |
 
@@ -82,14 +109,14 @@ A successful scan returns:
   "total_games": 412,
   "systems_detected": 2,
   "games_by_system": {"snes": 250, "psx": 162},
-  "undetected": 0,
+  "to_organise": 3,
   "scanned_systems": ["psx", "snes"],
   "media": { "...": "see Media coverage" },
   "timestamp": "2026-10-25T14:05:00"
 }
 ```
 
-`scanned_systems` is `null` when every system was scanned.
+`scanned_systems` is `null` when every system was scanned. `to_organise` counts the games waiting in the ROM folder, as `GET /api/new-roms` reports them.
 
 | Status | Meaning |
 |---|---|
@@ -112,7 +139,7 @@ Returns `404` with an `error` field if the folder doesn't exist.
 
 The library stats from the last scan, plus API key status and the DAT files on disk:
 
-- `detection`: `total_games`, `detected_systems`, `games_by_system`, `media`, `last_scan`, `scanned_systems`, `undetected_count`, `supported_systems`
+- `detection`: `total_games`, `detected_systems`, `games_by_system`, `media`, `last_scan`, `scanned_systems`, `to_organise`, `supported_systems`
 - `apis`: `enabled` and `configured` for `steamgriddb` and `screenscraper`
 - `dats`: the `.dat` files directly in the `dats/` folder, with their sizes and dates
 

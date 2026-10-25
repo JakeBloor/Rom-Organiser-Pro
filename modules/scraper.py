@@ -1,5 +1,6 @@
 import shutil
 import subprocess
+from collections import deque
 from pathlib import Path
 
 from config import SKYSCRAPER_PLATFORMS
@@ -43,11 +44,44 @@ def skyscraper_commands(system, rom_root, skyscraper="Skyscraper"):
     return [gather, generate]
 
 
-def run_skyscraper(system, logger, rom_root=None):
+def _run(command, on_output, should_stop):
+    """
+    Runs one Skyscraper command, passing each line it prints to on_output so
+    a long scrape shows what it's doing. Skyscraper gets no input, so it can
+    never sit waiting at a prompt. Returns (exit code, last lines printed), or
+    (None, ...) if should_stop said to stop.
+    """
+    process = subprocess.Popen(
+        command,
+        stdin=subprocess.DEVNULL,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        text=True,
+        errors="replace",
+    )
+    tail = deque(maxlen=20)
+
+    for line in process.stdout:
+        line = line.strip()
+        if line:
+            tail.append(line)
+            if on_output:
+                on_output(line)
+        if should_stop and should_stop():
+            process.terminate()
+            process.wait()
+            return None, list(tail)
+
+    return process.wait(), list(tail)
+
+
+def run_skyscraper(system, logger, rom_root=None, on_output=None, should_stop=None):
     """
     Scrape game data and media for one system. Returns True on success, False
     if this system failed, or None when scraping can't run at all (disabled or
-    Skyscraper missing), so callers can skip the remaining systems.
+    Skyscraper missing) or was stopped, so callers can skip the remaining
+    systems. on_output gets each line Skyscraper prints; should_stop is
+    checked as it goes.
     """
     if not settings.get("enable_screenscraper"):
         logger("[SCRAPER] Disabled")
@@ -67,12 +101,15 @@ def run_skyscraper(system, logger, rom_root=None):
     logger(f"[SCRAPER] Running {system}")
 
     for command in skyscraper_commands(system, rom_root, skyscraper):
-        result = subprocess.run(command, capture_output=True, text=True, check=False)
+        returncode, output = _run(command, on_output, should_stop)
 
-        if result.returncode != 0:
-            output = (result.stderr or result.stdout).strip().splitlines()
+        if returncode is None:
+            logger(f"[STOPPED] Scraping {system} was stopped", "WARNING")
+            return None
+
+        if returncode != 0:
             logger(
-                f"[SCRAPER ERROR] {system}: Skyscraper exited with {result.returncode}"
+                f"[SCRAPER ERROR] {system}: Skyscraper exited with {returncode}"
                 + (f": {output[-1]}" if output else ""),
                 "ERROR",
             )

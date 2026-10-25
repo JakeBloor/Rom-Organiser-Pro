@@ -1,6 +1,8 @@
 import os
 import threading
+import time
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
 from flask import Flask, render_template, request, jsonify
 from pathlib import Path
@@ -8,10 +10,11 @@ from datetime import datetime
 
 from modules import esde, settings
 from modules.artwork import fetch_artwork
-from modules.library import list_library, system_folders
+from modules.cache import LEFT_IN_PLACE, FileCache
+from modules.library import list_library, pending_games, system_folders
 from modules.media import media_coverage, steam_artwork_root
 from modules.srm import configure_srm
-from modules.organizer import process_roms
+from modules.organizer import process_roms, sort_by_priority
 from modules.scraper import run_skyscraper
 from modules.logging_utils import AppLogger
 from modules.dat_validation import fetch_latest_dats, load_dat_files
@@ -42,6 +45,13 @@ status = {
     "files_total": 0,
     "files_checked": 0,
     "current_file": "",
+    # What's happening to the current file or system, e.g. "checking 1.2 of 4.3 GB"
+    "current_detail": "",
+    # Seconds since the epoch: when the run started, and when progress last moved
+    "started_at": None,
+    "updated_at": None,
+    # Set by POST /api/stop; the run stops at the next file, system or game
+    "cancel_requested": False,
     **{counter: 0 for counter in STATUS_COUNTERS},
     # Images saved this run, per media type ("covers", "steam_tall", ...)
     "media_downloads": {},
@@ -53,29 +63,73 @@ status = {
 # Only one organise run at a time
 organise_lock = threading.Lock()
 
+# Games given artwork at once; each makes a few small requests
+ARTWORK_WORKERS = 4
+
+# Checksums and last outcomes of files in the ROM folder, shared by every run
+file_cache = FileCache()
+
 # Detection statistics tracking
 detection_stats = {
     "total_games": 0,
     "games_by_system": {},
     "last_scan": None,
     "supported_systems": len(SYSTEM_MAP),
-    "undetected_files": [],
     "media": None,
     # Systems the last scan was limited to; None means all of them
     "scanned_systems": None,
 }
 
 
+# Files in the ROM folder that still need organising, from the last check
+new_roms = {"rom_root": None, "new": [], "needs_attention": [], "checked": None}
+
+
+def check_new_roms(rom_root):
+    """
+    Finds the games dropped into the ROM folder that still need organising.
+    Ones a run already tried and left in place (unsorted, skipped or a
+    duplicate) are listed apart, with why, until they change.
+    """
+    rom_root = Path(rom_root)
+    waiting = []
+    attention = []
+
+    for path in pending_games(rom_root, file_cache):
+        name = path.relative_to(rom_root).as_posix()
+        entry = file_cache.get(path)
+        if entry and entry.get("outcome") in LEFT_IN_PLACE:
+            attention.append({"path": name, "reason": entry["outcome"]})
+        else:
+            waiting.append(name)
+
+    new_roms.update(
+        rom_root=str(rom_root),
+        new=waiting,
+        needs_attention=attention,
+        checked=datetime.now().isoformat(),
+    )
+    return new_roms
+
+
+def new_roms_summary():
+    return {
+        **new_roms,
+        "total": len(new_roms["new"]) + len(new_roms["needs_attention"]),
+        "all_organised": not new_roms["new"] and not new_roms["needs_attention"],
+    }
+
+
 def update_detection_stats(rom_root, systems=None):
-    games, undetected = list_library(rom_root, systems)
+    games = list_library(rom_root, systems)
     detection_stats["games_by_system"] = dict(
         Counter(system for system, _ in games).most_common()
     )
-    detection_stats["undetected_files"] = undetected
     detection_stats["total_games"] = len(games)
     detection_stats["media"] = media_coverage(games, esde.media_root(), steam_artwork_root())
     detection_stats["scanned_systems"] = sorted(systems) if systems else None
     detection_stats["last_scan"] = datetime.now().isoformat()
+    check_new_roms(rom_root)
 
 
 def build_report(placed, dry_run):
@@ -117,7 +171,7 @@ def api_status():
                 "media": detection_stats["media"],
                 "last_scan": detection_stats["last_scan"],
                 "scanned_systems": detection_stats["scanned_systems"],
-                "undetected_count": len(detection_stats["undetected_files"]),
+                "to_organise": new_roms_summary()["total"],
             },
             "apis": {
                 "steamgriddb": {
@@ -201,7 +255,7 @@ def scan_games():
                 "success": True,
                 "scanned_systems": detection_stats["scanned_systems"],
                 "total_games": detection_stats["total_games"],
-                "undetected": len(detection_stats["undetected_files"]),
+                "to_organise": new_roms_summary()["total"],
                 "systems_detected": len(detection_stats["games_by_system"]),
                 "games_by_system": detection_stats["games_by_system"],
                 "media": detection_stats["media"],
@@ -226,44 +280,118 @@ def list_systems():
     return jsonify({"systems": system_folders(rom_root)})
 
 
+@app.route("/api/new-roms")
+def api_new_roms():
+    """Check the ROM folder for games dropped in that still need organising"""
+    requested = request.args.get("rom_root")
+    rom_root = Path(requested) if requested else esde.rom_root()
+
+    if not rom_root.is_dir():
+        return jsonify({"error": f"ROM folder not found: {rom_root}"}), 404
+
+    # A run moves files while it goes; report what was found before it started
+    if not status["running"]:
+        check_new_roms(rom_root)
+    return jsonify(new_roms_summary())
+
+
+def _progress(**fields):
+    status.update(fields, updated_at=time.time())
+
+
+def _stopping():
+    return status["cancel_requested"]
+
+
+def _scrape(systems, rom_root):
+    for index, system in enumerate(systems):
+        if _stopping():
+            return
+        _progress(progress=int(index * 100 / len(systems)), current_file=system, current_detail="")
+        result = run_skyscraper(
+            system,
+            app_logger.log,
+            rom_root,
+            on_output=lambda line: _progress(current_detail=line[:120]),
+            should_stop=_stopping,
+        )
+        if result is None:
+            return
+
+
+def _download_artwork(games):
+    """Downloads artwork for several games at once, counting what each saved."""
+    media_root = esde.media_root()
+    steam_root = steam_artwork_root()
+
+    with ThreadPoolExecutor(max_workers=ARTWORK_WORKERS) as pool:
+        futures = {
+            pool.submit(fetch_artwork, game, media_root, steam_root, app_logger.log): game
+            for game in games
+        }
+        for done, future in enumerate(as_completed(futures), start=1):
+            saved = future.result()
+            if saved:
+                status["artwork_downloads"] += 1
+            for media_type in saved:
+                downloads = status["media_downloads"]
+                downloads[media_type] = downloads.get(media_type, 0) + 1
+            _progress(
+                progress=int(done * 100 / len(games)),
+                current_file=Path(futures[future]["path"]).name,
+                current_detail=f"{done} of {len(games)} games",
+            )
+            if _stopping():
+                pool.shutdown(cancel_futures=True)
+                break
+
+
 def run_organise(input_path, rom_root, dry_run):
     """Organise, then scrape game data and download covers. Runs in a worker thread."""
     try:
-        status["phase"] = "organising"
+        _progress(phase="finding", current_detail="looking for new games")
+        # Organising the ROM folder itself only touches what still needs it
+        files = None
+        if Path(input_path).resolve() == Path(rom_root).resolve():
+            files = [
+                file
+                for game, tracks in pending_games(rom_root, file_cache).items()
+                for file in [game, *tracks]
+            ]
+        _progress(phase="organising", current_detail="")
         placed = process_roms(
-            input_path, app_logger.log, status, dry_run=dry_run, rom_root=rom_root
+            input_path,
+            app_logger.log,
+            status,
+            dry_run=dry_run,
+            rom_root=rom_root,
+            files=files,
+            cache=file_cache,
         )
 
         if dry_run:
             app_logger.info("Dry run: no files were moved, nothing was scraped")
         elif placed:
-            systems = sorted({game["system"] for game in placed})
+            # The priority systems get their game data and artwork first
+            order = sort_by_priority({game["system"] for game in placed})
+            placed.sort(key=lambda game: order.index(game["system"]))
 
-            status["phase"] = "scraping"
-            for index, system in enumerate(systems):
-                status["progress"] = int(index * 100 / len(systems))
-                status["current_file"] = system
-                if run_skyscraper(system, app_logger.log, rom_root) is None:
-                    break
+            _progress(phase="scraping", progress=0)
+            _scrape(order, rom_root)
 
-            status["phase"] = "artwork"
-            media_root = esde.media_root()
-            steam_root = steam_artwork_root()
-            for index, game in enumerate(placed):
-                status["progress"] = int(index * 100 / len(placed))
-                status["current_file"] = Path(game["path"]).name
-                saved = fetch_artwork(game, media_root, steam_root, app_logger.log)
-                if saved:
-                    status["artwork_downloads"] += 1
-                for media_type in saved:
-                    downloads = status["media_downloads"]
-                    downloads[media_type] = downloads.get(media_type, 0) + 1
+            if not _stopping():
+                _progress(phase="artwork", progress=0, current_file="", current_detail="")
+                _download_artwork(placed)
 
             update_detection_stats(rom_root)
 
+        check_new_roms(rom_root)
         status["report"] = build_report(placed, dry_run)
-        status["phase"] = "done"
-        status["progress"] = 100
+        if _stopping():
+            _progress(phase="stopped")
+            app_logger.warning("Stopped: games not reached yet are still listed as new")
+            return
+        _progress(phase="done", progress=100)
         app_logger.success(
             f"COMPLETE: {status['roms_processed']} games "
             f"{'would be ' if dry_run else ''}organised, "
@@ -276,24 +404,29 @@ def run_organise(input_path, rom_root, dry_run):
         app_logger.error(f"Organise failed: {e}")
 
     finally:
+        try:
+            file_cache.save()
+        except OSError as e:
+            app_logger.warning(f"Couldn't save the file cache: {e}")
         status["running"] = False
         status["current_file"] = ""
+        status["current_detail"] = ""
         organise_lock.release()
 
 
 @app.route("/api/organise", methods=["POST"])
 def start_organise():
     body = request.get_json(silent=True) or {}
-    input_path = str(body.get("input_path", "")).strip()
     rom_root = str(body.get("rom_root", "")).strip() or str(esde.rom_root())
+    # Without an import folder, new games dropped into the ROM folder are organised
+    input_path = str(body.get("input_path", "")).strip() or rom_root
     dry_run = bool(body.get("dry_run", True))
-
-    # An empty path would resolve to the app's own folder
-    if not input_path or not Path(input_path).is_dir():
-        return jsonify({"error": f"Import folder not found: {input_path or '(empty)'}"}), 400
 
     if not Path(rom_root).is_dir():
         return jsonify({"error": f"ROM folder not found: {rom_root}"}), 400
+
+    if not Path(input_path).is_dir():
+        return jsonify({"error": f"Import folder not found: {input_path}"}), 400
 
     if not organise_lock.acquire(blocking=False):
         return jsonify({"error": "An organise run is already in progress"}), 409
@@ -307,20 +440,37 @@ def start_organise():
         files_total=0,
         files_checked=0,
         current_file="",
+        current_detail="",
+        started_at=time.time(),
+        updated_at=time.time(),
+        cancel_requested=False,
         media_downloads={},
         unsorted_files=[],
         report=None,
         **{counter: 0 for counter in STATUS_COUNTERS},
     )
-    app_logger.info(
-        f"{'Dry run' if dry_run else 'Organising'}: {input_path} -> {rom_root}"
-    )
+    action = "Dry run" if dry_run else "Organising"
+    if Path(input_path).resolve() == Path(rom_root).resolve():
+        app_logger.info(f"{action}: new games in {rom_root}")
+    else:
+        app_logger.info(f"{action}: {input_path} -> {rom_root}")
 
     threading.Thread(
         target=run_organise, args=(input_path, rom_root, dry_run), daemon=True
     ).start()
 
     return jsonify({"started": True}), 202
+
+
+@app.route("/api/stop", methods=["POST"])
+def stop_organise():
+    """Ask the current run to stop at the next file, system or game"""
+    if not status["running"]:
+        return jsonify({"error": "No organise run is going"}), 409
+
+    status["cancel_requested"] = True
+    app_logger.warning("Stopping after the current step...")
+    return jsonify({"stopping": True}), 202
 
 
 @app.route("/api/steam-rom-manager", methods=["POST"])
@@ -413,6 +563,9 @@ def initialize_dat_files():
             app_logger.success(
                 f"Found {detection_stats['total_games']} games across {len(detection_stats['games_by_system'])} systems"
             )
+            waiting = new_roms_summary()["total"]
+            if waiting:
+                app_logger.info(f"{waiting} new games in the ROM folder need organising")
         else:
             app_logger.warning(
                 f"ROM folder not found: {rom_root}; skipping startup scan"

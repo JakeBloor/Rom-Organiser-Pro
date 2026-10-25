@@ -2,7 +2,9 @@
 Step implementations for looking inside ROM files
 """
 
+import re
 import zipfile
+from pathlib import Path
 
 import pytest
 from pytest_bdd import given, scenario, scenarios, then, when, parsers
@@ -140,3 +142,67 @@ def sheet_tracks_are(archive_context, names):
 @then("a missing sheet should have no tracks")
 def missing_sheet_has_no_tracks(archive_context):
     assert sheet_tracks(archive_context["tmp"] / "missing.cue") == []
+
+
+@given("two copies of a 3 MB file and a third that differs only in the middle")
+def fingerprint_files(tmp_path, archive_context):
+    from modules.hashing import FINGERPRINT_SAMPLE
+
+    data = bytearray(3 * FINGERPRINT_SAMPLE)
+    for name in ("a.iso", "b.iso"):
+        (tmp_path / name).write_bytes(data)
+    data[len(data) // 2] = 1
+    (tmp_path / "c.iso").write_bytes(data)
+    archive_context["dir"] = tmp_path
+
+
+@then("the copies should have the same fingerprint")
+def same_fingerprint(archive_context):
+    from modules.hashing import fingerprint
+
+    folder = archive_context["dir"]
+    assert fingerprint(folder / "a.iso") == fingerprint(folder / "b.iso")
+
+
+@then("the third should have a different fingerprint")
+def different_fingerprint(archive_context):
+    from modules.hashing import fingerprint
+
+    folder = archive_context["dir"]
+    assert fingerprint(folder / "c.iso") != fingerprint(folder / "a.iso")
+
+
+@then("hashing a ROM without watching progress should still give its MD5")
+def hash_without_progress(archive_context):
+    import hashlib
+
+    from modules.hashing import hash_rom
+
+    path = archive_context["dir"] / "a.iso"
+    assert hash_rom(path)["md5"] == hashlib.md5(path.read_bytes()).hexdigest()
+
+
+@given(parsers.re(r"a PS3 game folder whose (?P<where>disc|installed) PARAM\.SFO is (?P<contents>.+)"))
+def ps3_folder_with_sfo(tmp_path, archive_context, where, contents):
+    from tests.sfo import make_sfo
+
+    folder = tmp_path / "BLUS30001"
+    sfo = folder / ("PS3_GAME/PARAM.SFO" if where == "disc" else "PARAM.SFO")
+    sfo.parent.mkdir(parents=True)
+    titled = re.fullmatch(r'titled "(.*)"', contents)
+    if titled:
+        sfo.write_bytes(make_sfo({"TITLE_ID": "BLUS30001", "TITLE": titled.group(1)}))
+    elif contents == "not a PARAM.SFO":
+        sfo.write_bytes(b"NOPE" + bytes(40))
+    elif contents == "cut short":
+        sfo.write_bytes(make_sfo({"TITLE": "Demon's Souls"})[:24])
+    elif contents == "without a title":
+        sfo.write_bytes(make_sfo({"TITLE_ID": "BLUS30001"}))
+    archive_context["ps3_folder"] = folder
+
+
+@then(parsers.re(r'its title should be "(?P<title>.*)"'))
+def ps3_folder_title(archive_context, title):
+    from modules.archives import ps3_title
+
+    assert ps3_title(archive_context["ps3_folder"]) == (title or None)

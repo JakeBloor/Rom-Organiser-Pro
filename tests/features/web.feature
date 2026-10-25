@@ -220,3 +220,93 @@ Feature: Organising from the web page
     And DAT fetch and load functions are stubbed
     When the app starts up
     Then the startup log should mention "defaults are in use"
+
+  Scenario: The page sees games dropped into the ROM folder, and which ones need you
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "New/Tetris (World).gb"
+    And "Mystery Disc.iso" was left in the ROM folder by an earlier run
+    When the ROM folder is checked for new games through the API
+    Then the check should find new "New/Tetris (World).gb, snes/Chrono Trigger (USA).sfc" and "Mystery Disc.iso" needing attention as "unsorted"
+
+  Scenario: The new games check uses the ES-DE ROM folder by default
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "gb/Tetris (World).gb"
+    And ES-DE's ROM folder is that folder
+    When the default ROM folder is checked for new games through the API
+    Then the check should find 2 new games
+
+  Scenario: Checking a missing ROM folder for new games is reported
+    When a missing ROM folder is checked for new games through the API
+    Then the check should fail with "ROM folder not found"
+
+  Scenario: While a run is going the last check is reported
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "New/Tetris (World).gb"
+    And an organise run is going
+    When the ROM folder is checked for new games through the API
+    Then the check should say everything is organised
+
+  Scenario: Without an import folder the games dropped into the ROM folder and its system folders are organised
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "New/Tetris (World).gb"
+    And scraping and cover downloads are stubbed
+    When the ROM folder is organised through the API
+    And the run finishes
+    And the ROM folder is checked for new games through the API
+    Then the ROM folder should now hold "gb/Tetris (World).gb"
+    And the ROM folder should now hold "snes/Chrono Trigger (USA).sfc"
+    And the status log should mention "new games in"
+    And the status log should mention "[IN PLACE]"
+    And the check should say everything is organised
+
+  Scenario: A cache that can't be saved is reported, not fatal
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "New/Tetris (World).gb"
+    And saving the file cache fails with "read-only"
+    When the ROM folder is organised in a dry run through the API
+    And the run finishes
+    Then the status log should mention "Couldn't save the file cache: read-only"
+
+  Scenario: Startup says when new games are waiting
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "New/Tetris (World).gb"
+    And ES-DE's ROM folder is that folder
+    And DAT fetch and load functions are stubbed
+    When the app starts up
+    Then the startup log should mention "2 new games in the ROM folder need organising"
+
+  Scenario: Startup says nothing about new games when none are waiting
+    Given ES-DE's ROM folder exists
+    And DAT fetch and load functions are stubbed
+    When the app starts up
+    Then the startup log should not mention "need organising"
+
+  Scenario: A run stopped while organising skips scraping and artwork
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "gb/Tetris (World).gb"
+    And scraping and cover downloads are stubbed
+    And a stop is requested once organising finishes
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the status phase should be "stopped"
+    And nothing should have been scraped
+    And the status log should mention "Stopped: games not reached yet are still listed as new"
+
+  Scenario: A run stopped during artwork downloads stops starting new ones
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "gb/Tetris (World).gb"
+    And the ROM folder also holds "gba/Golden Sun (USA).gba"
+    And scraping is stubbed and a stop is requested during the first artwork download
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the status phase should be "stopped"
+    And artwork should have been fetched for at most 1 game after the stop
+
+  Scenario: The priority systems are scraped first
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping and cover downloads are stubbed
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the systems should have been scraped in the order "psx, snes"
+    And the status should have shown Skyscraper's output
+
+  Scenario: Stopping needs a run to stop
+    When a stop is requested through the API
+    Then the stop should be refused because nothing is running
+
+  Scenario: Stopping a run asks it to stop
+    Given an organise run is going
+    When a stop is requested through the API
+    Then the run should be asked to stop

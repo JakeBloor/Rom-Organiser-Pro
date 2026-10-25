@@ -54,8 +54,10 @@ def import_folder_also_has(web_context, filename):
 def stub_scraping(web_context, monkeypatch, scrape_result, cover_downloaded=True):
     web_context["scraped"] = []
 
-    def fake_scrape(system, logger, rom_root):
+    def fake_scrape(system, logger, rom_root, on_output=None, should_stop=None):
         web_context["scraped"].append(system)
+        on_output(f"#1/1 scraping {system}")
+        web_context.setdefault("details", []).append(rom_app.status["current_detail"])
         return scrape_result
 
     monkeypatch.setattr(rom_app, "run_skyscraper", fake_scrape)
@@ -155,7 +157,7 @@ def rom_folder_holding(web_context, tmp_path, first, second):
     for relative_path in (first, second):
         path = rom_root / relative_path
         path.parent.mkdir(parents=True, exist_ok=True)
-        path.write_bytes(b"rom data")
+        path.write_bytes(f"rom {relative_path}".encode())
     web_context["rom_root"] = rom_root
 
 
@@ -365,7 +367,10 @@ def status_phase_is(web_context, phase):
 
 @then("another run can be started")
 def another_run_can_start(client, web_context, monkeypatch):
-    monkeypatch.undo()
+    # Only the failing organiser is put back; undo() would also drop the test's settings and cache
+    from modules import organizer
+
+    monkeypatch.setattr(rom_app, "process_roms", organizer.process_roms)
     web_context["response"] = start_run(
         client, web_context["import_dir"], web_context["rom_root"]
     )
@@ -589,3 +594,160 @@ def settings_api_restart(web_context):
 def settings_api_refuses(web_context, code, message):
     assert web_context["settings"].status_code == code
     assert any(message in text for text in web_context["settings"].get_json()["errors"].values())
+
+
+@given(parsers.parse('"{name}" was left in the ROM folder by an earlier run'))
+def left_by_earlier_run(web_context, name):
+    path = web_context["rom_root"] / name
+    path.write_bytes(b"mystery")
+    rom_app.file_cache.remember(path, outcome="unsorted")
+
+
+@given("an organise run is going")
+def organise_run_going(monkeypatch):
+    monkeypatch.setitem(rom_app.status, "running", True)
+
+
+@given(parsers.parse('saving the file cache fails with "{message}"'))
+def file_cache_save_fails(monkeypatch, message):
+    def failing_save():
+        raise OSError(message)
+
+    monkeypatch.setattr(rom_app.file_cache, "save", failing_save)
+
+
+@when("the ROM folder is checked for new games through the API")
+def check_new_games(client, web_context):
+    web_context["new_roms"] = client.get(
+        "/api/new-roms", query_string={"rom_root": str(web_context["rom_root"])}
+    )
+
+
+@when("the default ROM folder is checked for new games through the API")
+def check_default_new_games(client, web_context):
+    web_context["new_roms"] = client.get("/api/new-roms")
+
+
+@when("a missing ROM folder is checked for new games through the API")
+def check_missing_new_games(client, web_context, tmp_path):
+    web_context["new_roms"] = client.get(
+        "/api/new-roms", query_string={"rom_root": str(tmp_path / "missing")}
+    )
+
+
+@when("the ROM folder is organised through the API")
+def organise_rom_folder_through_api(client, web_context):
+    response = client.post(
+        "/api/organise", json={"rom_root": str(web_context["rom_root"]), "dry_run": False}
+    )
+    assert response.status_code == 202
+
+
+@when("the ROM folder is organised in a dry run through the API")
+def organise_rom_folder_dry_run_through_api(client, web_context):
+    response = client.post("/api/organise", json={"rom_root": str(web_context["rom_root"])})
+    assert response.status_code == 202
+
+
+@then(parsers.parse('the check should find new "{new}" and "{attention}" needing attention as "{reason}"'))
+def check_finds(web_context, new, attention, reason):
+    data = web_context["new_roms"].get_json()
+    assert data["new"] == new.split(", ")
+    assert data["needs_attention"] == [{"path": attention, "reason": reason}]
+    assert (data["total"], data["all_organised"]) == (len(data["new"]) + 1, False)
+
+
+@then(parsers.parse('the check should find {count:d} new games'))
+def check_finds_count(web_context, count):
+    data = web_context["new_roms"].get_json()
+    assert (data["total"], data["all_organised"]) == (count, False)
+
+
+@then("the check should say everything is organised")
+def check_all_organised(web_context):
+    data = web_context["new_roms"].get_json()
+    assert data["all_organised"] is True
+    assert data["total"] == 0
+
+
+@then(parsers.parse('the check should fail with "{text}"'))
+def check_fails(web_context, text):
+    assert web_context["new_roms"].status_code == 404
+    assert text in web_context["new_roms"].get_json()["error"]
+
+
+@then(parsers.parse('the ROM folder should now hold "{relative_path}"'))
+def rom_folder_now_holds(web_context, relative_path):
+    assert (web_context["rom_root"] / relative_path).is_file()
+
+
+@then(parsers.parse('the startup log should not mention "{text}"'))
+def startup_log_lacks(text):
+    assert not any(text in message for message in rom_app.app_logger.get_messages())
+
+
+@given("a stop is requested once organising finishes")
+def stop_after_organising(monkeypatch):
+    real_process_roms = rom_app.process_roms
+
+    def process_then_stop(*args, **kwargs):
+        placed = real_process_roms(*args, **kwargs)
+        rom_app.status["cancel_requested"] = True
+        return placed
+
+    monkeypatch.setattr(rom_app, "process_roms", process_then_stop)
+
+
+@given("scraping is stubbed and a stop is requested during the first artwork download")
+def stop_during_artwork(web_context, monkeypatch):
+    stub_scraping(web_context, monkeypatch, True)
+    monkeypatch.setattr(rom_app, "ARTWORK_WORKERS", 1)
+    web_context["artwork_calls"] = 0
+
+    def fetch_then_stop(*args):
+        web_context["artwork_calls"] += 1
+        rom_app.status["cancel_requested"] = True
+        return ["covers"]
+
+    monkeypatch.setattr(rom_app, "fetch_artwork", fetch_then_stop)
+
+
+@when("a stop is requested through the API")
+def stop_through_api(client, web_context):
+    web_context["stop"] = client.post("/api/stop")
+
+
+@given(parsers.parse('the ROM folder also holds "{relative_path}"'))
+def rom_folder_also_holds(web_context, relative_path):
+    path = web_context["rom_root"] / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(f"rom {relative_path}".encode())
+
+
+@then(parsers.parse("artwork should have been fetched for at most {count:d} game after the stop"))
+def artwork_fetched_at_most(web_context, count):
+    # The one worker may already have started the next game when the stop came
+    assert web_context["artwork_calls"] <= 1 + count
+    assert web_context["artwork_calls"] < 3
+
+
+@then(parsers.parse('the systems should have been scraped in the order "{systems}"'))
+def scraped_in_order(web_context, systems):
+    assert web_context["scraped"] == systems.split(", ")
+
+
+@then("the status should have shown Skyscraper's output")
+def status_showed_output(web_context):
+    assert web_context["details"] == ["#1/1 scraping psx", "#1/1 scraping snes"]
+
+
+@then("the stop should be refused because nothing is running")
+def stop_refused(web_context):
+    assert web_context["stop"].status_code == 409
+
+
+@then("the run should be asked to stop")
+def run_asked_to_stop(web_context):
+    assert web_context["stop"].status_code == 202
+    assert rom_app.status["cancel_requested"] is True
+    rom_app.status["cancel_requested"] = False

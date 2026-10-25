@@ -39,14 +39,16 @@ Startup messages appear in the terminal and on the page's log.
 
 ## Organise your first ROMs
 
-1. Put the new ROMs in a folder of their own, for example `~/Downloads/NewROMs`. Sub-folders are fine.
-2. On the page, enter that folder as the **ROM Import Folder**.
-3. Check the **EmuDeck ROM Folder**. It's filled in from ES-DE's settings, usually `~/Emulation/roms`.
+1. Drag and drop new games into their system folder in your ROM folder, for example `~/Emulation/roms/snes/` or `~/Emulation/roms/psx/`. Games dropped loose in the ROM folder, or in a folder of their own, work too: the app works out their system.
+2. Check the **ROM folder** on the page. It's filled in from ES-DE's settings.
+3. The **New games** panel lists what's waiting to be organised. It checks the folder every 30 seconds, or click **Check now**.
 4. Leave **Dry run** on and click **Preview (dry run)**. Nothing moves. The log shows where each file would go, and the run report shows what would happen.
-5. If the preview looks right, turn **Dry run** off and click the button again to organise for real. The app moves the files and then downloads game data and artwork.
+5. If the preview looks right, turn **Dry run** off and click the button again to organise for real. The app moves the games into place, removes the folders it emptied, and then downloads game data and artwork.
 6. Open ES-DE to see the games. To add them to Steam as well, see [Steam ROM Manager](artwork.md#steam-rom-manager).
 
-Files the app couldn't identify stay in the import folder. The run report lists them. Put each one in a folder named after its system (for example `ps2/`) and run again. See [How systems are detected](detection.md).
+The first time, every game already in your library shows as new, because the app hasn't organised any of them yet. The first real run works through them all once: it checks each against the DATs, looks for duplicates and fetches missing artwork, without moving games that are already in the right place. Hashing large disc images makes this run slow on a big library. After that, only games you add show as new.
+
+Games the app couldn't identify stay where you dropped them, and the New games panel lists them as needing you. Move each one into a folder named after its system (for example `ps2/`) and run again. See [How systems are detected](detection.md).
 
 ## Next steps
 

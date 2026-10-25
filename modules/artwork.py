@@ -1,4 +1,5 @@
 import re
+import threading
 from pathlib import Path
 from urllib.parse import quote
 
@@ -44,6 +45,20 @@ STEAMGRIDDB_QUERIES = {
 STEAMGRIDDB_FOR_ESDE = {"covers": "tall", "marquees": "logo", "fanart": "hero"}
 
 
+# (connect, read) seconds: a slow server shouldn't hold a run up for long
+TIMEOUT = (5, 15)
+# Artwork is downloaded for several games at once, each worker with its own
+# connection pool (requests sessions aren't safe to share between threads)
+_local = threading.local()
+
+
+def _get(url, **kwargs):
+    session = getattr(_local, "session", None)
+    if session is None:
+        session = _local.session = requests.Session()
+    return session.get(url, timeout=TIMEOUT, **kwargs)
+
+
 def _suffix(url):
     return ".jpg" if Path(url.split("?")[0]).suffix.lower() in (".jpg", ".jpeg") else ".png"
 
@@ -70,7 +85,7 @@ def _fetch_libretro(game, media_root, logger):
                 f"{quote(LIBRETRO_UNSAFE.sub('_', name))}.png"
             )
             try:
-                response = requests.get(url, timeout=15)
+                response = _get(url)
             except requests.RequestException as e:
                 logger(f"[ARTWORK ERROR] libretro thumbnails: {e}", "WARNING")
                 return saved
@@ -113,10 +128,9 @@ def _fetch_steamgriddb(game, media_root, steam_root, logger):
     saved = []
 
     try:
-        search = requests.get(
+        search = _get(
             f"{API_BASE}/search/autocomplete/{quote(search_name, safe='')}",
             headers=headers,
-            timeout=15,
         )
         search.raise_for_status()
         results = search.json().get("data") or []
@@ -129,11 +143,10 @@ def _fetch_steamgriddb(game, media_root, steam_root, logger):
 
         for kind in kinds:
             endpoint, params = STEAMGRIDDB_QUERIES[kind]
-            listing = requests.get(
+            listing = _get(
                 f"{API_BASE}/{endpoint}/game/{game_id}",
                 headers=headers,
                 params={**params, "types": "static"},
-                timeout=15,
             )
             listing.raise_for_status()
             images = listing.json().get("data") or []
@@ -142,7 +155,7 @@ def _fetch_steamgriddb(game, media_root, steam_root, logger):
                 continue
 
             img_url = images[0]["url"]
-            img = requests.get(img_url, timeout=30)
+            img = _get(img_url)
             img.raise_for_status()
             suffix = _suffix(img_url)
 

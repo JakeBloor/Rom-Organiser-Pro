@@ -5,7 +5,7 @@ ROM Organizer Pro is a small web app that sorts retro game ROMs into the folders
 - in **ES-DE**, EmuDeck's game launcher, and
 - in your **Steam library**, through Steam ROM Manager.
 
-You give it a folder of new ROMs. It works out which system each file is for, moves it into the right system folder, and fetches covers, screenshots, logos and the rest. A dry run shows you where everything would go before anything moves.
+Drop new games anywhere in your ROM folder. The app notices them, works out which system each one is for, moves it into the right system folder, and fetches covers, screenshots, logos and the rest. A dry run shows you where everything would go before anything moves.
 
 ## Guides
 
@@ -24,6 +24,6 @@ You give it a folder of new ROMs. It works out which system each file is for, mo
 ## At a glance
 
 - **Never overwrites.** If a file already exists at the destination, the new one stays where it was and the log says why.
-- **Never guesses when moving files.** If it can't tell the system for certain, the file stays in your import folder, marked as unsorted.
+- **Never guesses when moving files.** If it can't tell the system for certain, the file stays where you dropped it, marked as unsorted.
 - **Matches games against DAT files.** The No-Intro and Redump game lists identify each ROM by its checksum. That gives it the correct system and the official game name, which artwork lookups use.
 - **Lists each game once in both ES-DE and Steam,** including multi-disc games.

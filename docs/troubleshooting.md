@@ -1,6 +1,6 @@
 # Troubleshooting
 
-## A file was left in the import folder ("unsorted")
+## A game stays where I dropped it ("unsorted")
 
 The app couldn't tell its system for certain. This usually happens with shared extensions like `.iso`, `.chd`, `.bin` or `.zip`. Move the file into a folder named after its system, for example `ps2/Game.iso` or `saturn/Game.chd`, and run again. [How systems are detected](detection.md) lists the folder names that work.
 
@@ -10,7 +10,11 @@ A file or playlist with the same name already exists in the ROM folder, or anoth
 
 ## "Duplicate" files
 
-Two files in the import folder are the same ROM. Only the first one is moved; the duplicate stays in the import folder.
+The same game is already in your library, maybe under another name, or you dropped it in twice. Only one copy is organised; the duplicate stays where you dropped it. Delete it if you don't need it.
+
+## A game I fixed still shows as needing me
+
+The New games panel remembers why a game was left in place until the file changes or a run tries it again. Click **Organise** to try it again, or delete `cache/files.json` to clear everything the app has remembered.
 
 ## Few games match a DAT
 
@@ -58,6 +62,13 @@ The page shows an error if SRM's settings file is missing or broken. Open Steam 
 - **To open it from another device,** set **Listen address** to `0.0.0.0` on the Settings page, restart the app, and use the Deck's IP address.
 - **If port 8181 is taken,** choose another **Port** on the Settings page and restart. If the app can't start at all, edit `"port"` in `settings.json`, or delete `settings.json` to go back to the defaults.
 - **If you changed the listen address or port,** the new values only apply after a restart.
+
+## A run takes ages, or seems stuck
+
+- **Look at the line under the progress bar.** It shows what the run is doing right now, such as "checking 2.1 GB of 4.3 GB" or Skyscraper's latest line, and how long since progress last moved. A minute of quiet usually means one big file or a slow scrape.
+- **Big disc images:** files over **Largest file to check against DATs** (1 GB by default) are only fingerprinted. If you raised that setting, the first run reads every image in full, which takes about a minute per 4 GB from an SD card.
+- **Your first run** works through your whole library once. Click **Stop** at any time; the next run carries on with the games that are left.
+- **Skyscraper** can take a long time for a big system, especially without a ScreenScraper account. Turn off **Scrape game data with Skyscraper** in Settings to skip it, and scrape from ES-DE later.
 
 ## "An organise run is already in progress"
 

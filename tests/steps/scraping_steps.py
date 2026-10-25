@@ -2,8 +2,6 @@
 Step implementations for scraping and artwork tests
 """
 
-import subprocess
-
 import pytest
 import requests
 from pytest_bdd import given, scenario, scenarios, then, when, parsers
@@ -58,17 +56,34 @@ def no_screenscraper_credentials(monkeypatch):
     )
 )
 def skyscraper_installed(scrape_context, monkeypatch, code, output):
-    scrape_context["commands"] = []
+    install_fake_skyscraper(scrape_context, monkeypatch, int(code), (output or "").split("\n"))
 
-    def fake_run(command, **kwargs):
+
+class FakeSkyscraper:
+    """Stands in for subprocess.Popen: prints lines, then exits with a code."""
+
+    def __init__(self, scrape_context, code, lines, command, **kwargs):
         scrape_context["commands"].append(command)
-        return subprocess.CompletedProcess(
-            command, int(code), stdout="", stderr=output or ""
-        )
+        scrape_context["popen_kwargs"] = kwargs
+        self.scrape_context = scrape_context
+        self.code = code
+        self.stdout = iter(line + "\n" for line in lines)
 
+    def terminate(self):
+        self.scrape_context["terminated"] = True
+
+    def wait(self):
+        return self.code
+
+
+def install_fake_skyscraper(scrape_context, monkeypatch, code, lines):
+    scrape_context["commands"] = []
     monkeypatch.setitem(settings.current, "enable_screenscraper", True)
     monkeypatch.setattr("modules.scraper.shutil.which", lambda name: "/usr/bin/Skyscraper")
-    monkeypatch.setattr("modules.scraper.subprocess.run", fake_run)
+    monkeypatch.setattr(
+        "modules.scraper.subprocess.Popen",
+        lambda command, **kwargs: FakeSkyscraper(scrape_context, code, lines, command, **kwargs),
+    )
     monkeypatch.setitem(settings.current, "esde_home", str(scrape_context["tmp"] / "ES-DE"))
 
 
@@ -170,3 +185,43 @@ def generate_command(scrape_context, system):
     assert option(generate, "-g") == str(esde_home / "gamelists" / system)
     assert option(generate, "-o") == str(esde_home / "downloaded_media" / system)
     assert option(generate, "-i") == str(scrape_context["tmp"] / "roms" / system)
+
+
+@given(parsers.parse('Skyscraper is installed and prints "{lines}"'))
+def skyscraper_prints(scrape_context, monkeypatch, lines):
+    install_fake_skyscraper(scrape_context, monkeypatch, 0, lines.split(" | "))
+    monkeypatch.setitem(settings.current, "esde_home", str(scrape_context["tmp"] / "ES-DE"))
+
+
+@when(parsers.parse('game data is scraped for "{system}" while watching its output'))
+def scrape_watching(scrape_context, system):
+    scrape_context["output"] = []
+    scrape_context["result"] = scraper.run_skyscraper(
+        system, record_log(scrape_context), scrape_context["tmp"],
+        on_output=scrape_context["output"].append,
+    )
+
+
+@when(parsers.parse('game data is scraped for "{system}" and stopped after "{line}"'))
+def scrape_and_stop(scrape_context, system, line):
+    scrape_context["output"] = []
+    scrape_context["result"] = scraper.run_skyscraper(
+        system, record_log(scrape_context), scrape_context["tmp"],
+        on_output=scrape_context["output"].append,
+        should_stop=lambda: line in scrape_context["output"],
+    )
+
+
+@then(parsers.parse('the output seen should be "{lines}"'))
+def output_seen(scrape_context, lines):
+    assert scrape_context["output"] == lines.split(" | ")
+
+
+@then("Skyscraper should get no input")
+def skyscraper_no_input(scrape_context):
+    assert scrape_context["popen_kwargs"]["stdin"] is scraper.subprocess.DEVNULL
+
+
+@then("Skyscraper should have been stopped")
+def skyscraper_stopped(scrape_context):
+    assert scrape_context["terminated"] is True

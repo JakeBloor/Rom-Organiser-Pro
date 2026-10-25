@@ -42,3 +42,17 @@ Feature: Game data and artwork
       | output                                 | message                                                       |
       | Starting\nScreenScraper login failed   | snes: Skyscraper exited with 1: ScreenScraper login failed    |
       |                                        | snes: Skyscraper exited with 1                                |
+
+  Scenario: Skyscraper's output is shown as it runs, and it never waits for input
+    Given Skyscraper is installed and prints "Pass 1 | #1/3 Chrono Trigger |  | #2/3 Tetris"
+    When game data is scraped for "snes" while watching its output
+    Then the output seen should be "Pass 1 | #1/3 Chrono Trigger | #2/3 Tetris | Pass 1 | #1/3 Chrono Trigger | #2/3 Tetris"
+    And Skyscraper should get no input
+    And scraping should report success
+
+  Scenario: A stopped scrape ends Skyscraper and skips the remaining systems
+    Given Skyscraper is installed and prints "Pass 1 | #1/3 Chrono Trigger | #2/3 Tetris"
+    When game data is scraped for "snes" and stopped after "#1/3 Chrono Trigger"
+    Then Skyscraper should have been stopped
+    And scraping should report it can't run
+    And the scraping log should mention "Scraping snes was stopped"

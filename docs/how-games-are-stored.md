@@ -1,6 +1,12 @@
 # How games are stored
 
-Games go into one folder per system inside the ROM folder, named the way ES-DE and EmuDeck expect: `snes/`, `psx/`, `ps2/`, `gc/` and so on.
+Games go into one folder per system inside the ROM folder, named the way ES-DE and EmuDeck expect: `snes/`, `psx/`, `ps2/`, `gc/` and so on. ES-DE only shows games inside these folders.
+
+Drop new games into their system folder, or anywhere else in the ROM folder. Organising moves each one into place, then removes any folder it emptied. System folders are never removed.
+
+PS3 games are folders, either a `Game.ps3/` folder or a disc folder holding `PS3_GAME/`. Each is treated as one game and never looked inside. Its name comes from its `PARAM.SFO`, because the folder is often just a title ID like `BLUS30443`. A PS3 folder dropped anywhere else in the ROM folder is recognised and moved into `ps3/`.
+
+A game in a system folder keeps that system as long as the system can run its file type, even if a DAT match suggests another one. A `.gba` file dropped into `snes/` is moved to `gba/`, because the SNES can't run it.
 
 ## Single-file games
 
@@ -60,6 +66,6 @@ This looks tidiest in ES-DE. It doesn't suit Steam, though: EmuDeck's Steam ROM 
 
 - **Nothing is overwritten.** If a destination file or playlist already exists, or another file in the same run is heading for the same place, the file stays where it was and is counted as **skipped**.
 - **Duplicates stay put.** A file with the same checksum as one already handled in this run is counted as a **duplicate**.
-- **No guessing.** A file whose system can't be determined for certain stays in the import folder as **unsorted**. See [How systems are detected](detection.md).
+- **No guessing.** A file whose system can't be determined for certain stays where you dropped it as **unsorted**. See [How systems are detected](detection.md).
 - **Non-ROM files are ignored.** Files whose extension no system uses, like `.txt` or `.nfo`, are left alone.
 - **Dry run** logs every move and playlist the run would make, and changes nothing.

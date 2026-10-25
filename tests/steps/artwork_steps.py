@@ -12,6 +12,7 @@ from pytest_bdd import given, scenarios, then, when, parsers
 from modules import settings
 
 from modules.artwork import API_BASE, LIBRETRO_BASE, fetch_artwork
+from modules.artwork import _get as REAL_GET
 from modules.media import (
     ESDE_MEDIA_TYPES,
     STEAM_IMAGE_TYPES,
@@ -73,7 +74,7 @@ def art_context(tmp_path, monkeypatch):
             return FakeResponse(payload={"data": images})
         return FakeResponse(content=f"sgdb {url}".encode())
 
-    monkeypatch.setattr("modules.artwork.requests.get", fake_get)
+    monkeypatch.setattr("modules.artwork._get", fake_get)
     monkeypatch.setitem(settings.current, "enable_libretro_thumbnails", True)
     monkeypatch.setitem(settings.current, "enable_steamgriddb", True)
     monkeypatch.setitem(settings.current, "steamgriddb_api", "test-key")
@@ -243,3 +244,35 @@ def libretro_not_asked(art_context):
 @then("nothing should be requested")
 def nothing_requested(art_context):
     assert art_context["requests"] == []
+
+
+@given("connections are counted")
+def connections_counted(art_context, monkeypatch):
+    import modules.artwork as artwork_module
+
+    art_context["sessions"] = []
+
+    class CountingSession:
+        def __init__(self):
+            art_context["sessions"].append(self)
+
+        def get(self, url, **kwargs):
+            return FakeResponse(content=url.encode())
+
+    monkeypatch.setattr(artwork_module.requests, "Session", CountingSession)
+    monkeypatch.setattr(artwork_module, "_local", artwork_module.threading.local())
+    # The fixture's stand-in for _get is put back to the real one
+    monkeypatch.setattr(artwork_module, "_get", REAL_GET)
+
+
+@when("two images are requested on this thread")
+def two_images_requested(art_context):
+    import modules.artwork as artwork_module
+
+    art_context["responses"] = [artwork_module._get(url) for url in ("https://a/1.png", "https://a/2.png")]
+
+
+@then(parsers.parse("{count:d} connection should have been opened"))
+def connections_opened(art_context, count):
+    assert len(art_context["sessions"]) == count
+    assert [r.content for r in art_context["responses"]] == [b"https://a/1.png", b"https://a/2.png"]

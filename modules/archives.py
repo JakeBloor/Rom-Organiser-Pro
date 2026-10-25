@@ -1,9 +1,11 @@
 """
-Look inside ROM files without unpacking them: the single ROM in a .zip, and
-the header of a disc image, so files with shared extensions can be identified.
+Look inside ROM files without unpacking them: the single ROM in a .zip, the
+header of a disc image, so files with shared extensions can be identified,
+and the title of a PS3 game folder.
 """
 
 import re
+import struct
 import zipfile
 from pathlib import Path
 
@@ -113,4 +115,53 @@ def sniff_disc_system(path):
         if re.search(rb"BOOT\s*=", data):
             return "psx"
 
+    return None
+
+
+# What's inside a PS3 game folder, however it's named
+PS3_FOLDER_MARKERS = ("PS3_GAME", "PS3_DISC.SFB")
+
+
+def is_ps3_folder(folder):
+    """A PS3 game: a "Game.ps3" folder, or a disc or installed game folder."""
+    folder = Path(folder)
+    return folder.suffix.lower() == ".ps3" or any(
+        (folder / marker).exists() for marker in PS3_FOLDER_MARKERS
+    )
+
+
+SFO_MAGIC = b"\0PSF"
+SFO_HEADER = struct.Struct("<4sIIII")  # magic, version, key table, data table, entries
+SFO_ENTRY = struct.Struct("<HHIII")  # key offset, format, length, max length, data offset
+
+
+def sfo_title(sfo_path):
+    """The TITLE in a PS3 PARAM.SFO (e.g. "Demon's Souls"), or None if it can't be read."""
+    try:
+        data = Path(sfo_path).read_bytes()
+        magic, _, key_table, data_table, entries = SFO_HEADER.unpack_from(data)
+        if magic != SFO_MAGIC:
+            return None
+
+        for index in range(entries):
+            key_offset, _, length, _, data_offset = SFO_ENTRY.unpack_from(
+                data, SFO_HEADER.size + index * SFO_ENTRY.size
+            )
+            key_start = key_table + key_offset
+            key = data[key_start:data.index(b"\0", key_start)]
+            if key == b"TITLE":
+                value = data[data_table + data_offset:data_table + data_offset + length]
+                return value.rstrip(b"\0").decode("utf-8", "replace").strip() or None
+    except (OSError, struct.error, ValueError):
+        return None
+
+    return None
+
+
+def ps3_title(folder):
+    """A PS3 game folder's title from its PARAM.SFO, for disc and installed layouts."""
+    for sfo in ("PS3_GAME/PARAM.SFO", "PARAM.SFO"):
+        title = sfo_title(Path(folder) / sfo)
+        if title:
+            return title
     return None

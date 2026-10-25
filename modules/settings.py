@@ -50,6 +50,13 @@ FIELDS = (
     Field("multi_file_layout", "Multi-file game layout", "choice", "shared", "Folders",
           "Shared suits ES-DE and Steam. ES-DE folders only suit ES-DE.",
           choices=(("shared", "Shared (ES-DE and Steam)"), ("esde", "ES-DE folders"))),
+    Field("priority_systems", "Systems to organise first", "text", "psx, ps2, ps3, psp, gc, n64, xbox",
+          "Organising",
+          "System folder names, in order. These are organised, scraped and given artwork first."),
+    Field("dat_check_limit_mb", "Largest file to check against DATs (MB)", "int", 1024, "Organising",
+          "Bigger files, and compressed images such as .chd and .rvz, are only fingerprinted: "
+          "quick to check for duplicates, but not matched to a DAT name. Reading a 4 GB "
+          "PS2 image from an SD card takes about a minute.", minimum=1, maximum=1_000_000),
     Field("enable_libretro_thumbnails", "Download libretro thumbnails", "bool", True, "Artwork",
           "Covers, screenshots and title screens. No account needed."),
     Field("enable_steamgriddb", "Download from SteamGridDB", "bool", True, "Artwork",
@@ -85,6 +92,11 @@ load_error = None
 
 def get(key):
     return current[key]
+
+
+def priority_systems():
+    """The priority system folder names, in order."""
+    return [name.strip() for name in current["priority_systems"].split(",") if name.strip()]
 
 
 def path(key):

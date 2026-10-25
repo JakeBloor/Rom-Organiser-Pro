@@ -12,7 +12,8 @@ modules/
   hashing.py           MD5/SHA-1, using the ROM inside a single-file zip
   dat_fetcher.py       Downloads the pinned libretro database
   dat_validation.py    Loads DAT files and looks up checksums
-  library.py           Lists and counts the games in a ROM folder the way ES-DE does
+  library.py           Lists games the way ES-DE does; finds new games still to organise
+  cache.py             Checksums and last outcomes per file, trusted while size and mtime match
   media.py             ES-DE and Steam image paths, and media coverage counts
   artwork.py           libretro and SteamGridDB downloads
   scraper.py           Runs Skyscraper for game data and extra media
@@ -31,17 +32,28 @@ tests/
 
 ## How a run works
 
-1. **The request is checked.** `POST /api/organise` checks both folders, takes the run lock (a second run gets `409`), resets `status` and starts `run_organise` in a thread.
-2. **Files are organised.** `process_roms` walks the import folder. Track files are skipped here because they move with their sheet. For each candidate it:
-   1. hashes the file
-   2. looks the checksum up in the DATs
-   3. otherwise calls `detect_system(..., allow_guess=False)`
-   4. places the game with `_place`, which refuses to overwrite and records each planned destination so two files can't claim the same one
-   5. groups discs by title and handles them after the loop
-3. **Each game is described.** `process_roms` returns one entry per placed game: `{system, title, names, dat_title, path}`. `path` is the file ES-DE and Steam list, which may be a playlist or a folder treated as a game.
-4. **Game data is scraped.** `run_skyscraper` runs per system. A `None` result (disabled or not installed) skips the remaining systems.
-5. **Artwork is downloaded.** `fetch_artwork` runs per game and returns the media types it saved.
-6. **The report is built.** `build_report` summarises the run. Real runs then rescan the library.
+1. **The request is checked.** `POST /api/organise` checks the folders, takes the run lock (a second run gets `409`), resets `status` and starts `run_organise` in a thread. Without `input_path`, the ROM folder is organised in place.
+2. **New games are found.** In place, `library.pending_games` lists what still needs organising:
+   - games in a system folder the cache hasn't recorded as `organised`
+   - multi-file games in a system folder that `organizer.stores_multi_file_games_apart` says belong elsewhere
+   - everything outside the system folders
+
+   Only those files go to `process_roms`.
+3. **Files are organised.** `process_roms` goes through the files. Track files are skipped here because they move with their sheet. For each candidate it:
+   1. identifies the file with `_identify`: a full MD5 and SHA-1 for DAT lookups, or just a 3 MB `hashing.fingerprint` for compressed images and files over `dat_check_limit_mb`. The result's `identity` is reused from the `FileCache` while the file is unchanged. Reading reports bytes to the progress bar.
+   2. reports it as a duplicate if this run, or the cache's record of games already organised, has the same checksum
+   3. looks the checksum up in the DATs
+   4. keeps the system folder the file is in when that system accepts its extension, ignoring a DAT match for another system; otherwise uses the DAT match, then `detect_system(..., allow_guess=False)`
+   5. places the game with `_place`, which organises a file already in the right place where it is (`[IN PLACE]`), refuses to overwrite, and records each planned destination so two files can't claim the same one
+   6. groups discs by title and handles them after the loop
+
+   Files are sorted by `settings.priority_systems()` first. PS3 game folders are placed whole by `_place_ps3_folder`, titled from `archives.ps3_title`. `status["cancel_requested"]` is checked before each file.
+
+   The cache records every file left in place (`unsorted`, `skipped` or `duplicate`) and every game moved (`organised`). Folders a real run emptied are removed, except system folders. The cache is saved when the run ends, even if it failed.
+4. **Each game is described.** `process_roms` returns one entry per placed game: `{system, title, names, dat_title, path}`. `path` is the file ES-DE and Steam list, which may be a playlist or a folder treated as a game.
+5. **Game data is scraped.** `run_skyscraper` runs per system, priority systems first. Skyscraper gets no input, so it can't block on a prompt. Each line it prints goes to `status["current_detail"]`. A `None` result (disabled, not installed or stopped) skips the remaining systems.
+6. **Artwork is downloaded.** `fetch_artwork` runs for `ARTWORK_WORKERS` games at once. Each worker thread reuses one `requests.Session`, with (5, 15) second timeouts.
+7. **The report is built.** `build_report` summarises the run. Real runs then rescan the library, and every run checks for new games again.
 
 The page asks for `GET /status` every second, and draws the progress and the report from it.
 
@@ -71,7 +83,7 @@ The tests never touch the network, your real folders or your real settings files
 - **HTTP** is replaced with fake responses (`modules.artwork.requests.get`).
 - **Folders and Steam ROM Manager settings** live in `tmp_path`.
 - **ES-DE's folders** come from patched `esde.rom_root` and `esde.media_root`.
-- **Settings:** an autouse fixture in `tests/conftest.py` points `settings.SETTINGS_FILE` and `settings.LOCAL_SETTINGS_FILE` at `tmp_path` and starts each test from the defaults. Tests change a setting with `monkeypatch.setitem(settings.current, "key", value)`.
+- **Settings:** an autouse fixture in `tests/conftest.py` points `settings.SETTINGS_FILE` and `settings.LOCAL_SETTINGS_FILE` at `tmp_path` and starts each test from the defaults, with an empty file cache in `tmp_path`. It also waits for any organise run a test started to finish. Tests change a setting with `monkeypatch.setitem(settings.current, "key", value)`.
 
 ## Adding a system
 

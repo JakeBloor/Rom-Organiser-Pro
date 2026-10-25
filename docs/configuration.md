@@ -31,6 +31,13 @@ If a file is missing, its settings use their defaults. If a file is broken, the 
 
 Two folders are fixed, relative to the app folder: DAT files go in `dats/` and log files in `logs/`. ES-DE's game lists are in `gamelists/` inside the ES-DE folder.
 
+## Organising
+
+| Setting | Default | What it does |
+|---|---|---|
+| Systems to organise first | `psx, ps2, ps3, psp, gc, n64, xbox` | System folder names, in order. These are organised, scraped and given artwork first, so they're ready soonest on a long run. Other systems follow in alphabetical order. |
+| Largest file to check against DATs (MB) | `1024` | Files up to this size are read in full and checked against the DATs for their official name. Bigger files are only fingerprinted, as are compressed images (`.chd`, `.rvz`, `.cso`, `.wbfs` and others) of any size, since DATs list uncompressed images. A fingerprint reads 3 MB, enough to catch duplicates. Reading a 4 GB PS2 image from an SD card takes about a minute, so raising this makes first runs much slower. |
+
 ## Artwork
 
 | Setting | Default | What it does |

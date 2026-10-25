@@ -48,7 +48,7 @@ Without a helpful folder name, the app looks inside the file:
 
 ## Unsorted files
 
-If none of these settles it, the file stays in the import folder and is reported as **unsorted**. The organiser never falls back to a best guess.
+If none of these settles it, the file stays where you dropped it and is reported as **unsorted**. The organiser never falls back to a best guess.
 
 Scanning your library is different, because it moves nothing. When counting a file outside the system folders, the scan may go with the most likely system.
 

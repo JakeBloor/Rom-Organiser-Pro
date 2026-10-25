@@ -27,12 +27,22 @@ def clear_app_logger():
 
 @pytest.fixture(autouse=True)
 def isolated_settings(tmp_path, monkeypatch):
-    """Every test starts from the default settings and never sees the real settings files or ES-DE."""
+    """Every test starts from the default settings and an empty file cache, never the real ones, and never sees ES-DE."""
     from modules import settings
 
     monkeypatch.setattr(settings, "SETTINGS_FILE", tmp_path / "settings.json")
     monkeypatch.setattr(settings, "LOCAL_SETTINGS_FILE", tmp_path / "settings.local.json")
     settings.load()
     monkeypatch.setitem(settings.current, "esde_home", str(tmp_path / "no-ES-DE"))
+
+    import app
+    from modules.cache import FileCache
+
+    monkeypatch.setattr(app, "file_cache", FileCache(tmp_path / "cache" / "files.json"))
+    app.new_roms.update(rom_root=None, new=[], needs_attention=[], checked=None)
     yield
+
+    # A run left going in its worker thread must finish before the real cache comes back
+    assert app.organise_lock.acquire(timeout=10), "an organise run did not finish"
+    app.organise_lock.release()
     settings.load()

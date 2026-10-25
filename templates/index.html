@@ -53,8 +53,8 @@
               </div>
               <div class="col-md-4">
                 <div class="stat-mini">
-                  <small class="text-muted">Undetected</small>
-                  <div class="h5 text-warning" id="undetectedCount">--</div>
+                  <small class="text-muted">To organise</small>
+                  <div class="h5 text-warning" id="toOrganiseCount">--</div>
                 </div>
               </div>
             </div>
@@ -108,31 +108,29 @@
 
         <form id="organiseForm" onsubmit="startOrganise(event)">
           <div class="mb-3">
-            <label class="form-label" for="inputPath">ROM Import Folder</label>
-            <input
-              class="form-control"
-              id="inputPath"
-              name="input_path"
-              placeholder="/home/deck/Downloads/NewROMs"
-              required
-            />
-            <div class="form-text">
-              New ROMs to sort. Files the app can't identify are left here.
-            </div>
-          </div>
-
-          <div class="mb-3">
-            <label class="form-label" for="romRoot">EmuDeck ROM Folder</label>
+            <label class="form-label" for="romRoot">ROM folder</label>
             <input
               class="form-control"
               id="romRoot"
               name="rom_root"
               value="{{ rom_root }}"
-              onchange="loadSystems()"
+              onchange="loadSystems(); checkNewRoms()"
             />
             <div class="form-text">
-              Games go into one folder per system here, the way ES-DE expects.
+              Drop new games anywhere in this folder: loose, in a folder of their own, or in a
+              system folder. Organising moves them where ES-DE and Steam expect.
             </div>
+          </div>
+
+          <div id="newRoms" class="new-roms mb-3" role="status" aria-live="polite">
+            <div class="d-flex flex-wrap justify-content-between align-items-center gap-2">
+              <strong id="newRomsSummary">Checking for new games...</strong>
+              <button type="button" class="btn btn-sm btn-outline-secondary" onclick="checkNewRoms()">
+                Check now
+              </button>
+            </div>
+            <ul id="newRomsList" class="small mb-1 mt-2 d-none"></ul>
+            <small id="newRomsChecked" class="text-body-secondary"></small>
           </div>
 
           <div class="form-check form-switch mb-3">
@@ -195,8 +193,14 @@
         </form>
         <hr />
 
-        <h4 class="mb-1">📊 Progress</h4>
-        <p class="text-muted mb-2" id="phaseText">Idle</p>
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-1">
+          <h4 class="mb-0">📊 Progress</h4>
+          <button type="button" id="stopBtn" class="btn btn-sm btn-outline-danger d-none" onclick="stopRun()">
+            Stop
+          </button>
+        </div>
+        <p class="text-muted mb-0" id="phaseText">Idle</p>
+        <p class="small mb-2" id="phaseDetail" aria-live="polite"></p>
 
         <div class="progress mb-4" role="progressbar" aria-label="Organise progress">
           <div class="progress-bar" id="progressBar" style="width: 0%">0%</div>
@@ -535,7 +539,7 @@ dats/
               showFormMessage(
                 `Scan complete: ${data.total_games} games across ${data.systems_detected} systems` +
                   (data.scanned_systems ? ` (scanned ${data.scanned_systems.join(", ")})` : "") +
-                  `, ${data.undetected} undetected files.`,
+                  `, ${data.to_organise} to organise.`,
                 "success",
               );
             } else {
@@ -570,8 +574,8 @@ dats/
               data.detection.total_games;
             document.getElementById("systemsCount").textContent =
               data.detection.detected_systems;
-            document.getElementById("undetectedCount").textContent =
-              data.detection.undetected_count;
+            document.getElementById("toOrganiseCount").textContent =
+              data.detection.to_organise;
 
             // Library report
             const systems = Object.entries(data.detection.games_by_system);
@@ -859,12 +863,31 @@ dats/
       const PHASES = {
         idle: "Idle",
         starting: "Starting…",
-        organising: "Organising files",
-        scraping: "Scraping game data",
-        artwork: "Downloading covers",
+        finding: "Step 1 of 4: Finding new games",
+        organising: "Step 2 of 4: Organising games",
+        scraping: "Step 3 of 4: Scraping game data",
+        artwork: "Step 4 of 4: Downloading artwork",
         done: "Finished",
+        stopped: "Stopped",
         failed: "Failed",
       };
+      // A step this quiet for this long is probably a single big file or a slow scrape
+      const QUIET_SECONDS = 60;
+
+      function duration(seconds) {
+        seconds = Math.max(0, Math.round(seconds));
+        const h = Math.floor(seconds / 3600);
+        const m = Math.floor((seconds % 3600) / 60);
+        const s = seconds % 60;
+        return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+      }
+
+      function stopRun() {
+        const btn = document.getElementById("stopBtn");
+        btn.disabled = true;
+        btn.textContent = "Stopping…";
+        fetch("/api/stop", { method: "POST" }).catch((err) => console.error("Stop failed:", err));
+      }
       let wasRunning = false;
 
       function updateRunButton() {
@@ -875,6 +898,65 @@ dats/
         btn.classList.toggle("btn-danger", !dryRun);
       }
 
+      const NEW_ROM_REASONS = {
+        unsorted: "couldn't tell which system it's for: move it into a system folder",
+        skipped: "a game with this name is already there",
+        duplicate: "already in your library",
+      };
+      const NEW_ROMS_SHOWN = 20;
+
+      function renderNewRoms(data) {
+        const summary = document.getElementById("newRomsSummary");
+        const list = document.getElementById("newRomsList");
+        const panel = document.getElementById("newRoms");
+        const waiting = data.new.length;
+        const attention = data.needs_attention.length;
+
+        panel.classList.toggle("has-new", waiting > 0);
+        if (data.all_organised) {
+          summary.textContent = "✓ Everything in the ROM folder is organised";
+        } else {
+          const parts = [];
+          if (waiting) parts.push(`${waiting} new ${waiting === 1 ? "game" : "games"} to organise`);
+          if (attention) parts.push(`${attention} ${attention === 1 ? "needs" : "need"} you`);
+          summary.textContent = `📥 ${parts.join(" · ")}`;
+        }
+
+        const items = [
+          ...data.new.map((path) => [path, ""]),
+          ...data.needs_attention.map((item) => [item.path, NEW_ROM_REASONS[item.reason] || item.reason]),
+        ];
+        list.replaceChildren();
+        for (const [path, reason] of items.slice(0, NEW_ROMS_SHOWN)) {
+          const row = el("li", "", path);
+          if (reason) row.append(el("span", "text-body-secondary", ` (${reason})`));
+          list.append(row);
+        }
+        if (items.length > NEW_ROMS_SHOWN) {
+          list.append(el("li", "text-body-secondary", `and ${items.length - NEW_ROMS_SHOWN} more`));
+        }
+        list.classList.toggle("d-none", !items.length);
+
+        document.getElementById("newRomsChecked").textContent = data.checked
+          ? `Checked at ${new Date(data.checked).toLocaleTimeString()}`
+          : "";
+      }
+
+      function checkNewRoms() {
+        const rom_root = document.getElementById("romRoot").value;
+        fetch(`/api/new-roms?${new URLSearchParams({ rom_root })}`, { cache: "no-store" })
+          .then((r) => r.json())
+          .then((data) => {
+            if (data.error) {
+              document.getElementById("newRomsSummary").textContent = data.error;
+              document.getElementById("newRomsList").classList.add("d-none");
+              return;
+            }
+            renderNewRoms(data);
+          })
+          .catch((err) => console.error("New games check failed:", err));
+      }
+
       function startOrganise(event) {
         event.preventDefault();
         document.getElementById("formMessage").classList.add("d-none");
@@ -883,7 +965,6 @@ dats/
           method: "POST",
           headers: { "Content-Type": "application/json" },
           body: JSON.stringify({
-            input_path: document.getElementById("inputPath").value,
             rom_root: document.getElementById("romRoot").value,
             dry_run: document.getElementById("dryRun").checked,
           }),
@@ -916,6 +997,33 @@ dats/
             if (data.phase !== "idle" && data.dry_run) phase += " · dry run";
             document.getElementById("phaseText").textContent = phase;
 
+            // Elapsed time, and how long since progress last moved, so a slow step doesn't look stuck
+            const detail = [];
+            const now = Date.now() / 1000;
+            if (data.running && data.current_detail) detail.push(data.current_detail);
+            if (data.started_at && data.phase !== "idle") {
+              const end = data.running ? now : data.updated_at || now;
+              detail.push(`${data.running ? "running" : "took"} ${duration(end - data.started_at)}`);
+            }
+            const quiet = data.running && data.updated_at ? now - data.updated_at : 0;
+            if (quiet > QUIET_SECONDS) {
+              detail.push(
+                `no progress for ${duration(quiet)}: still working on one big file or a slow scrape`,
+              );
+            }
+            if (data.running && data.cancel_requested) detail.push("stopping after the current step…");
+            const detailText = document.getElementById("phaseDetail");
+            detailText.textContent = detail.join(" · ");
+            detailText.classList.toggle("text-warning", quiet > QUIET_SECONDS);
+            detailText.classList.toggle("text-body-secondary", quiet <= QUIET_SECONDS);
+
+            const stopBtn = document.getElementById("stopBtn");
+            stopBtn.classList.toggle("d-none", !data.running);
+            if (!data.running) {
+              stopBtn.disabled = false;
+              stopBtn.textContent = "Stop";
+            }
+
             const stats = {
               statProcessed: data.roms_processed,
               statDat: data.dat_matches,
@@ -934,14 +1042,17 @@ dats/
             if (atBottom) log.scrollTop = log.scrollHeight;
 
             document.getElementById("organiseBtn").disabled = data.running;
-            for (const id of ["inputPath", "romRoot", "dryRun"]) {
+            for (const id of ["romRoot", "dryRun"]) {
               document.getElementById(id).disabled = data.running;
             }
 
             renderReport(data.report);
 
             // Library counts change once a real run finishes
-            if (wasRunning && !data.running) updateStatusPanel();
+            if (wasRunning && !data.running) {
+              updateStatusPanel();
+              checkNewRoms();
+            }
             wasRunning = data.running;
           })
           .catch((err) => console.error("Status poll error:", err));
@@ -949,6 +1060,11 @@ dats/
 
       updateRunButton();
       loadSystems();
+      checkNewRoms();
+      // Notice games dropped into the ROM folder while the page is open
+      setInterval(() => {
+        if (!wasRunning && !document.hidden) checkNewRoms();
+      }, 30000);
       pollStatus();
       setInterval(pollStatus, 1000);
     </script>

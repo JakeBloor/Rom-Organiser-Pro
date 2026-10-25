@@ -76,3 +76,8 @@ Feature: Downloading images for ES-DE and Steam
     And "snes/Chrono Trigger (USA).sfc" already has its Steam artwork
     When artwork is fetched for "snes/Chrono Trigger (USA).sfc" named "Chrono Trigger (USA)"
     Then the saved media should be "covers, marquees, fanart"
+
+  Scenario: Each download worker reuses one connection
+    Given connections are counted
+    When two images are requested on this thread
+    Then 1 connection should have been opened

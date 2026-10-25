@@ -46,3 +46,23 @@ Feature: Looking inside ROM files
 
   Scenario: A missing sheet has no tracks
     Then a missing sheet should have no tracks
+
+  Scenario: Fingerprints tell files apart without reading them in full
+    Given two copies of a 3 MB file and a third that differs only in the middle
+    Then the copies should have the same fingerprint
+    And the third should have a different fingerprint
+    And hashing a ROM without watching progress should still give its MD5
+
+  Scenario Outline: A PS3 game folder's title is read from its PARAM.SFO
+    Given a PS3 game folder whose <where> PARAM.SFO is <contents>
+    Then its title should be "<title>"
+
+    Examples:
+      | where     | contents                         | title         |
+      | disc      | titled "Demon's Souls"           | Demon's Souls |
+      | installed | titled "Journey"                 | Journey       |
+      | disc      | missing                          |               |
+      | disc      | not a PARAM.SFO                  |               |
+      | disc      | cut short                        |               |
+      | disc      | without a title                  |               |
+      | disc      | titled ""                        |               |

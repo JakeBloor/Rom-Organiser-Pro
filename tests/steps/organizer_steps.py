@@ -11,6 +11,8 @@ from pytest_bdd import given, scenario, scenarios, then, when, parsers
 from modules import settings
 
 from modules.dat_validation import DAT_DB
+from modules.cache import FileCache
+from modules.library import pending_games
 from modules.organizer import process_roms
 
 EXISTING_ROM_CONTENT = b"existing rom"
@@ -31,6 +33,8 @@ def organiser_context(tmp_path, monkeypatch):
         "rom_root": rom_root,
         "log": [],
         "status": {},
+        "cache": FileCache(tmp_path / "cache" / "files.json"),
+        "hashed": [],
     }
 
 
@@ -282,3 +286,186 @@ def existing_rom_unchanged(organiser_context):
 @then(parsers.parse('the log should mention "{text}"'))
 def log_mentions(organiser_context, text):
     assert any(text in message for message in organiser_context["log"])
+
+
+@given(parsers.parse('"{relative_path}" is dropped into the ROM folder'))
+def dropped_into_rom_folder(organiser_context, relative_path):
+    path = organiser_context["rom_root"] / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(f"rom {path.stem}".encode())
+
+
+@given(parsers.parse('a copy of "{source}" is dropped into the ROM folder as "{relative_path}"'))
+def copy_dropped_into_rom_folder(organiser_context, source, relative_path):
+    root = organiser_context["rom_root"]
+    (root / relative_path).write_bytes((root / source).read_bytes())
+
+
+@given("ROM hashing is counted")
+def hashing_counted(organiser_context, monkeypatch):
+    from modules import organizer
+
+    real_hash_rom = organizer.hash_rom
+
+    def counting_hash_rom(path, progress=None):
+        organiser_context["hashed"].append(path)
+        return real_hash_rom(path, progress)
+
+    monkeypatch.setattr(organizer, "hash_rom", counting_hash_rom)
+
+
+def organise_rom_folder(organiser_context, dry_run=False):
+    root = organiser_context["rom_root"]
+    files = [f for game, tracks in pending_games(root).items() for f in [game, *tracks]]
+    organiser_context["placed"] = process_roms(
+        root,
+        lambda message, level="INFO": organiser_context["log"].append(message),
+        organiser_context["status"],
+        dry_run=dry_run,
+        rom_root=root,
+        files=files,
+        cache=organiser_context["cache"],
+    )
+
+
+@given("the ROM folder is organised")
+@when("the ROM folder is organised")
+def rom_folder_organised(organiser_context):
+    organise_rom_folder(organiser_context)
+
+
+@when("the ROM folder is organised in dry-run mode")
+def rom_folder_organised_dry_run(organiser_context):
+    organise_rom_folder(organiser_context, dry_run=True)
+
+
+@when(parsers.parse('"{relative_path}" is changed'))
+def file_changed(organiser_context, relative_path):
+    path = organiser_context["rom_root"] / relative_path
+    path.write_bytes(path.read_bytes() + b" changed")
+
+
+@then(parsers.parse('the folder "{relative_path}" should be gone'))
+def folder_gone(organiser_context, relative_path):
+    assert not (organiser_context["rom_root"] / relative_path).exists()
+
+
+@then(parsers.parse('the cache should say "{relative_path}" was {outcome}'))
+def cache_outcome(organiser_context, relative_path, outcome):
+    entry = organiser_context["cache"].get(organiser_context["rom_root"] / relative_path)
+    assert entry["outcome"] == outcome
+
+
+@then(parsers.re(r"(?P<count>\d+) files? should have been hashed"))
+def files_hashed(organiser_context, count):
+    assert len(organiser_context["hashed"]) == int(count)
+
+
+@then("no duplicates should be reported")
+def no_duplicates(organiser_context):
+    assert organiser_context["status"].get("duplicates", 0) == 0
+    assert not any("[DUPLICATE]" in message for message in organiser_context["log"])
+
+
+@given(parsers.parse('the DATs list "{relative_path}" in the ROM folder as "{name}" for "{system}" in "{dat_title}"'))
+def dats_list_rom_folder_file(organiser_context, monkeypatch, relative_path, name, system, dat_title):
+    contents = (organiser_context["rom_root"] / relative_path).read_bytes()
+    monkeypatch.setitem(DAT_DB, hashlib.md5(contents).hexdigest(), (name, system, dat_title))
+
+
+@then("the placed game should have no DAT name")
+def placed_game_has_no_dat_name(organiser_context):
+    (game,) = organiser_context["placed"]
+    assert game["dat_title"] is None
+    assert game["names"] == ["Chrono Trigger (USA)"]
+
+
+@given(parsers.parse("files up to {megabytes:d} MB are checked against the DATs"))
+def dat_check_limit(monkeypatch, megabytes):
+    monkeypatch.setitem(settings.current, "dat_check_limit_mb", megabytes)
+
+
+@given(parsers.parse('a {megabytes:d} MB "{relative_path}" is dropped into the ROM folder'))
+def big_file_dropped(organiser_context, megabytes, relative_path):
+    path = organiser_context["rom_root"] / relative_path
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_bytes(path.stem.encode().ljust(megabytes * 1024 * 1024, b"\0"))
+
+
+@given(parsers.parse("reading happens in {megabytes:d} MB chunks"))
+def reading_chunks(organiser_context, monkeypatch, megabytes):
+    monkeypatch.setattr("modules.hashing.CHUNK_SIZE", megabytes * 1024 * 1024)
+    # The big file must be read in full to see its progress
+    monkeypatch.setitem(settings.current, "dat_check_limit_mb", 1000)
+    details = organiser_context["details"] = []
+
+    class RecordingStatus(dict):
+        def __setitem__(self, key, value):
+            if key == "current_detail" and value:
+                details.append(value)
+            super().__setitem__(key, value)
+
+    organiser_context["status"] = RecordingStatus()
+
+
+@given("a stop has been requested")
+def stop_requested(organiser_context):
+    organiser_context["status"]["cancel_requested"] = True
+
+
+@then(parsers.parse('the cache should hold a fingerprint for "{relative_path}"'))
+def cache_holds_fingerprint(organiser_context, relative_path):
+    entry = organiser_context["cache"].get(organiser_context["rom_root"] / relative_path)
+    assert entry["identity"].startswith("fp:")
+    assert "md5" not in entry
+
+
+@then(parsers.parse('the cache should know nothing about "{relative_path}"'))
+def cache_knows_nothing(organiser_context, relative_path):
+    assert organiser_context["cache"].get(organiser_context["rom_root"] / relative_path) is None
+
+
+@then(parsers.parse('the games should have been organised in the order "{systems}"'))
+def organised_in_order(organiser_context, systems):
+    assert [game["system"] for game in organiser_context["placed"]] == systems.split(", ")
+
+
+@then(parsers.parse('the progress should have shown "{detail}"'))
+def progress_shown(organiser_context, detail):
+    assert detail in organiser_context["details"]
+
+
+@then(parsers.parse('{done:g} GB of {size:g} GB should read as "{text}"'))
+def gigabytes_read_as(done, size, text):
+    from modules.organizer import _size
+
+    gb = 1024 ** 3
+    assert f"{_size(done * gb, size * gb)} of {_size(size * gb, size * gb)}" == text
+
+
+@given(parsers.parse('a PS3 disc folder "{relative_path}" titled "{title}" with {count:d} files is dropped into the ROM folder'))
+def ps3_disc_folder(organiser_context, relative_path, title, count):
+    from tests.sfo import make_sfo
+
+    folder = organiser_context["rom_root"] / relative_path / "PS3_GAME"
+    (folder / "USRDIR").mkdir(parents=True)
+    (folder / "PARAM.SFO").write_bytes(make_sfo({"TITLE": title}))
+    for index in range(count):
+        (folder / "USRDIR" / f"DATA{index:04}.BIN").write_bytes(b"data")
+
+
+@given(parsers.parse('a PS3 game folder "{relative_path}" is dropped into the ROM folder'))
+def ps3_game_folder(organiser_context, relative_path):
+    eboot = organiser_context["rom_root"] / relative_path / "PS3_GAME" / "USRDIR" / "EBOOT.BIN"
+    eboot.parent.mkdir(parents=True)
+    eboot.write_bytes(b"eboot")
+
+
+@then(parsers.parse('the placed games should be titled "{titles}"'))
+def placed_titles(organiser_context, titles):
+    assert sorted(game["title"] for game in organiser_context["placed"]) == titles.split(", ")
+
+
+@then("nothing should be waiting to be organised")
+def nothing_waiting(organiser_context):
+    assert pending_games(organiser_context["rom_root"], organiser_context["cache"]) == {}
