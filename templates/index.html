@@ -98,6 +98,22 @@
             <small id="srmMessage" class="ms-2 text-body-secondary" role="status"></small>
           </div>
 
+          <div class="mb-3">
+            <button
+              type="button"
+              id="artworkBtn"
+              class="btn btn-sm btn-outline-primary"
+              onclick="downloadArtworkPacks()"
+            >
+              Download EmuMovies artwork
+            </button>
+            <small class="ms-2 text-body-secondary">
+              Unpacks EmuMovies' artwork for every system in the ROM folder, once. Several GB per
+              system; progress shows below.
+            </small>
+            <small id="artworkMessage" class="d-block text-body-secondary" role="status"></small>
+          </div>
+
           <div class="mb-2">
             <small class="text-muted"
               >Last scanned: <span id="lastScanTime">--:--:--</span>
@@ -900,10 +916,12 @@ dats/
       const PHASES = {
         idle: "Idle",
         starting: "Starting…",
-        finding: "Step 1 of 4: Finding new games",
-        organising: "Step 2 of 4: Organising games",
-        scraping: "Step 3 of 4: Scraping game data",
-        artwork: "Step 4 of 4: Downloading artwork",
+        finding: "Step 1 of 5: Finding new games",
+        organising: "Step 2 of 5: Organising games",
+        emumovies: "Step 3 of 5: Downloading from EmuMovies",
+        scraping: "Step 4 of 5: Scraping game data",
+        artwork: "Step 5 of 5: Downloading other artwork",
+        packs: "Downloading EmuMovies artwork packs",
         done: "Finished",
         stopped: "Stopped",
         failed: "Failed",
@@ -917,6 +935,20 @@ dats/
         const m = Math.floor((seconds % 3600) / 60);
         const s = seconds % 60;
         return h ? `${h}h ${m}m` : m ? `${m}m ${s}s` : `${s}s`;
+      }
+
+      function downloadArtworkPacks() {
+        const message = document.getElementById("artworkMessage");
+        fetch("/api/emumovies/artwork", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ rom_root: document.getElementById("romRoot").value }),
+        })
+          .then((r) => r.json().then((data) => ({ ok: r.ok, data })))
+          .then(({ ok, data }) => {
+            message.textContent = ok ? "Started. Follow it under Progress." : data.error;
+          })
+          .catch((err) => (message.textContent = `Couldn't start: ${err.message}`));
       }
 
       function stopRun() {
@@ -1083,6 +1115,7 @@ dats/
             if (atBottom) log.scrollTop = log.scrollHeight;
 
             document.getElementById("organiseBtn").disabled = data.running;
+            document.getElementById("artworkBtn").disabled = data.running;
             for (const id of ["romRoot", "dryRun", "forceAll"]) {
               document.getElementById(id).disabled = data.running;
             }

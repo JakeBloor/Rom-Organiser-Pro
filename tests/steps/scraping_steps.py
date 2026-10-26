@@ -182,6 +182,8 @@ def generate_command(scrape_context, system):
     assert "-s" not in generate
     assert option(generate, "-f") == "esde"
     assert "videos" in option(generate, "--flags").split(",")
+    # Media from EmuMovies, the first source, must never be overwritten
+    assert {"skipexistingcovers", "skipexistingvideos", "skipexistingmanuals"} <= set(option(generate, "--flags").split(","))
     assert option(generate, "-g") == str(esde_home / "gamelists" / system)
     assert option(generate, "-o") == str(esde_home / "downloaded_media" / system)
     assert option(generate, "-i") == str(scrape_context["tmp"] / "roms" / system)

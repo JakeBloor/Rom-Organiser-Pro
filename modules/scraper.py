@@ -7,6 +7,13 @@ from config import SKYSCRAPER_PLATFORMS, canonical_system
 from modules import esde, settings
 
 
+# Skyscraper's flags for leaving media files already in place alone
+SKIP_EXISTING = (
+    "skipexistingbackcovers", "skipexistingcovers", "skipexistingfanarts", "skipexistingmanuals",
+    "skipexistingmarquees", "skipexistingscreenshots", "skipexistingvideos", "skipexistingwheels",
+)
+
+
 def _platform(system):
     """Skyscraper's name for a system, also for ES-DE's other folder names."""
     canonical = canonical_system(system)
@@ -44,7 +51,8 @@ def skyscraper_commands(system, rom_root, skyscraper="Skyscraper"):
         "-f", "esde",
         "-g", str(esde.gamelists_root() / system),
         "-o", str(esde.media_root() / system),
-        "--flags", "unattend,videos",
+        # Media already there (from EmuMovies, the first source) is kept
+        "--flags", "unattend,videos," + ",".join(SKIP_EXISTING),
     ]
 
     return [gather, generate]

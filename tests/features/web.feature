@@ -330,3 +330,90 @@ Feature: Organising from the web page
     Then the status should show 2 games organised
     And the status log should mention "Re-organise everything (preview)"
     And the check should say everything is organised
+
+  Scenario: EmuMovies is the first source asked, before Skyscraper and the others
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping and cover downloads are stubbed
+    And EmuMovies is stubbed to save covers and videos
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then EmuMovies should have been asked before Skyscraper for "psx, snes"
+    And the status should count 2 EmuMovies downloads
+    And the EmuMovies connection should have been closed
+
+  Scenario: Without an EmuMovies connection the other sources still run
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping and cover downloads are stubbed
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the systems should have been scraped in the order "psx, snes"
+
+  Scenario: A run stopped during EmuMovies downloads skips the rest
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping and cover downloads are stubbed
+    And EmuMovies is stubbed and a stop is requested during its first game
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the status phase should be "stopped"
+    And EmuMovies should have been asked for 1 game
+    And nothing should have been scraped
+
+  Scenario: A run stopped while scraping one system skips the systems after it
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping is stubbed to ask for a stop after the first system
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the systems should have been scraped in the order "psx"
+    And the status phase should be "stopped"
+
+  Scenario: EmuMovies artwork packs are downloaded from the page
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And EmuMovies artwork downloads are stubbed
+    When EmuMovies artwork is downloaded through the API
+    And the run finishes
+    Then the status phase should be "done"
+    And the status log should mention "EmuMovies artwork: 2 packs unpacked, 1 already up to date, 0 failed"
+    And the EmuMovies connection should have been closed
+
+  Scenario: EmuMovies artwork needs EmuMovies set up
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    When EmuMovies artwork is downloaded through the API
+    And the run finishes
+    Then the status phase should be "failed"
+    And the status log should mention "EmuMovies artwork needs EmuMovies switched on"
+
+  Scenario: An error while downloading EmuMovies artwork is reported
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And EmuMovies artwork downloads fail with "disk full"
+    When EmuMovies artwork is downloaded through the API
+    And the run finishes
+    Then the status phase should be "failed"
+    And the status log should mention "EmuMovies artwork failed: disk full"
+
+  Scenario Outline: EmuMovies artwork can't start
+    Given <situation>
+    When EmuMovies artwork is downloaded through the API for <folder>
+    Then the artwork request should be refused with status <code>
+
+    Examples:
+      | situation                                                                    | folder              | code |
+      | a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd" | a missing folder    | 400  |
+      | an organise run is already in progress                                       | ES-DE's ROM folder  | 409  |
+
+  Scenario: Organise runs fill images from the EmuMovies artwork library
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping and cover downloads are stubbed
+    And the EmuMovies artwork library holds "psx/covers/Spyro (USA).png"
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then the status should count 1 EmuMovies download
+    And the ES-DE "covers" image for "psx/Spyro (USA).chd" should come from the library
+
+  Scenario: The artwork library isn't used when switched off
+    Given a ROM folder holding "snes/Chrono Trigger (USA).sfc" and "psx/Spyro (USA).chd"
+    And scraping and cover downloads are stubbed
+    And the EmuMovies artwork library holds "psx/covers/Spyro (USA).png"
+    And EmuMovies artwork packs are switched off
+    When the ROM folder is organised through the API
+    And the run finishes
+    Then nothing should have come from EmuMovies

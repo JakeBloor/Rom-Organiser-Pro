@@ -389,7 +389,7 @@ def status_api_lists(web_context, name):
     data = web_context["api_status"].get_json()
     assert [dat["name"] for dat in data["dats"]["files"]] == [name]
     assert data["dats"]["total_files"] == 1
-    assert set(data["apis"]) == {"steamgriddb", "screenscraper"}
+    assert set(data["apis"]) == {"emumovies", "steamgriddb", "screenscraper"}
     assert data["detection"]["total_games"] == 0
     assert data["detection"]["last_scan"]
 
@@ -780,3 +780,158 @@ def reorganise_dry_run_through_api(client, web_context):
 @then(parsers.parse("the status should show {count:d} games organised"))
 def status_shows_organised(web_context, count):
     assert web_context["status"]["roms_processed"] == count
+
+
+class StubEmuMovies:
+    def __init__(self):
+        self.closed = False
+
+    def close(self):
+        self.closed = True
+
+
+def stub_emumovies(web_context, monkeypatch, saved, stop=False):
+    stub = web_context["emumovies"] = StubEmuMovies()
+    web_context["emumovies_games"] = []
+    web_context["order"] = []
+
+    def fake_fetch(game, media_root, server, logger, library=None):
+        web_context["emumovies_games"].append(game["system"])
+        web_context["order"].append(("emumovies", game["system"]))
+        if stop:
+            rom_app.status["cancel_requested"] = True
+        return saved
+
+    monkeypatch.setattr(rom_app.emumovies, "connect", lambda logger: stub)
+    monkeypatch.setattr(rom_app.emumovies, "fetch_emumovies", fake_fetch)
+    real_scrape = rom_app.run_skyscraper
+
+    def recording_scrape(system, *args, **kwargs):
+        web_context["order"].append(("skyscraper", system))
+        return real_scrape(system, *args, **kwargs)
+
+    monkeypatch.setattr(rom_app, "run_skyscraper", recording_scrape)
+
+
+@given("EmuMovies is stubbed to save covers and videos")
+def emumovies_stubbed(web_context, monkeypatch):
+    stub_emumovies(web_context, monkeypatch, ["covers", "videos"])
+
+
+@given("EmuMovies is stubbed and a stop is requested during its first game")
+def emumovies_stop(web_context, monkeypatch):
+    stub_emumovies(web_context, monkeypatch, [], stop=True)
+
+
+@then(parsers.parse('EmuMovies should have been asked before Skyscraper for "{systems}"'))
+def emumovies_first(web_context, systems):
+    order = web_context["order"]
+    systems = systems.split(", ")
+    assert [s for kind, s in order if kind == "emumovies"] == systems
+    last_emumovies = max(i for i, (kind, _) in enumerate(order) if kind == "emumovies")
+    first_scrape = min(i for i, (kind, _) in enumerate(order) if kind == "skyscraper")
+    assert last_emumovies < first_scrape
+
+
+@then(parsers.parse("the status should count {count:d} EmuMovies downloads"))
+def emumovies_downloads(web_context, count):
+    assert web_context["status"]["emumovies_downloads"] == count
+    assert web_context["status"]["media_downloads"]["videos"] == count
+
+
+@then("the EmuMovies connection should have been closed")
+def emumovies_closed(web_context):
+    assert web_context["emumovies"].closed
+
+
+@then(parsers.parse("EmuMovies should have been asked for {count:d} game"))
+def emumovies_asked(web_context, count):
+    assert len(web_context["emumovies_games"]) == count
+
+
+@given("scraping is stubbed to ask for a stop after the first system")
+def scrape_then_stop(web_context, monkeypatch):
+    stub_scraping(web_context, monkeypatch, True)
+    stubbed = rom_app.run_skyscraper
+
+    def scrape_and_stop(system, *args, **kwargs):
+        result = stubbed(system, *args, **kwargs)
+        rom_app.status["cancel_requested"] = True
+        return result
+
+    monkeypatch.setattr(rom_app, "run_skyscraper", scrape_and_stop)
+
+
+@given("EmuMovies artwork downloads are stubbed")
+def artwork_stubbed(web_context, monkeypatch):
+    stub = web_context["emumovies"] = StubEmuMovies()
+    monkeypatch.setattr(rom_app.emumovies, "connect", lambda logger: stub)
+
+    def fake_download_packs(server, rom_root, library, logger, progress, should_stop):
+        progress("Sony Playstation (Boxes-2D): part 1 of 1, 5 of 10 MB")
+        return {"installed": 2, "up_to_date": 1, "failed": 0}
+
+    monkeypatch.setattr(rom_app.emumovies_packs, "download_packs", fake_download_packs)
+
+
+@given(parsers.parse('EmuMovies artwork downloads fail with "{message}"'))
+def artwork_fails(web_context, monkeypatch, message):
+    artwork_stubbed(web_context, monkeypatch)
+
+    def failing(*args, **kwargs):
+        raise OSError(message)
+
+    monkeypatch.setattr(rom_app.emumovies_packs, "download_packs", failing)
+
+
+@when("EmuMovies artwork is downloaded through the API")
+def artwork_through_api(client, web_context):
+    web_context["artwork"] = client.post("/api/emumovies/artwork", json={"rom_root": str(web_context["rom_root"])})
+    assert web_context["artwork"].status_code == 202
+
+
+@when(parsers.parse("EmuMovies artwork is downloaded through the API for {folder}"))
+def artwork_through_api_for(client, web_context, tmp_path, folder):
+    body = {"rom_root": str(tmp_path / "missing")} if folder == "a missing folder" else {"rom_root": str(tmp_path)}
+    web_context["artwork"] = client.post("/api/emumovies/artwork", json=body)
+
+
+@then(parsers.parse("the artwork request should be refused with status {code:d}"))
+def artwork_refused(web_context, code):
+    assert web_context["artwork"].status_code == code
+
+
+@given(parsers.parse('the EmuMovies artwork library holds "{relative_path}"'))
+def artwork_library_holds(web_context, monkeypatch, tmp_path, relative_path):
+    library = tmp_path / "emumovies-artwork"
+    image = library / relative_path
+    image.parent.mkdir(parents=True)
+    image.write_bytes(b"emumovies cover")
+    web_context["media_root"] = tmp_path / "media"
+    monkeypatch.setitem(rom_app.settings.current, "enable_emumovies", True)
+    monkeypatch.setitem(rom_app.settings.current, "emumovies_artwork_dir", str(library))
+    monkeypatch.setattr(rom_app.esde, "media_root", lambda: web_context["media_root"])
+    monkeypatch.setattr(rom_app.emumovies, "connect", lambda logger: None)
+
+
+@given("EmuMovies artwork packs are switched off")
+def artwork_off(monkeypatch):
+    monkeypatch.setitem(rom_app.settings.current, "emumovies_artwork", False)
+
+
+@then(parsers.parse("the status should count {count:d} EmuMovies download"))
+def emumovies_download_count(web_context, count):
+    assert web_context["status"]["emumovies_downloads"] == count
+
+
+@then(parsers.parse('the ES-DE "{media_type}" image for "{game_path}" should come from the library'))
+def image_from_library(web_context, media_type, game_path):
+    from modules.media import esde_media_path
+
+    path = esde_media_path(web_context["media_root"], game_path.split("/")[0], web_context["rom_root"] / game_path, media_type, ".png")
+    assert path.read_bytes() == b"emumovies cover"
+
+
+@then("nothing should have come from EmuMovies")
+def nothing_from_emumovies(web_context):
+    assert web_context["status"]["emumovies_downloads"] == 0

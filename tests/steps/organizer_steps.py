@@ -609,3 +609,13 @@ def playlists_repaired_count(organiser_context, count):
 def playlist_reads(organiser_context, relative_path, entries):
     playlist = organiser_context["rom_root"] / relative_path
     assert playlist.read_text().splitlines() == entries.split(" | ")
+
+
+@then(parsers.parse('the log should include "{line}"'))
+def log_includes(organiser_context, line):
+    assert line in organiser_context["log"], organiser_context["log"]
+
+
+@then(parsers.parse('the log should include a line starting "{start}"'))
+def log_includes_start(organiser_context, start):
+    assert any(message.startswith(start) for message in organiser_context["log"]), organiser_context["log"]

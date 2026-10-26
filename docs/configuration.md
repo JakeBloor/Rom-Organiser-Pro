@@ -38,6 +38,17 @@ Two folders are fixed, relative to the app folder: DAT files go in `dats/` and l
 | Systems to organise first | `psx, ps2, ps3, psp, gc, n64, xbox` | System folder names, in order. These are organised, scraped and given artwork first, so they're ready soonest on a long run. Other systems follow in alphabetical order. |
 | Largest file to check against DATs (MB) | `1024` | Files up to this size are read in full and checked against the DATs for their official name. Bigger files are only fingerprinted, as are compressed images (`.chd`, `.rvz`, `.cso`, `.wbfs` and others) of any size, since DATs list uncompressed images. A fingerprint reads 3 MB, enough to catch duplicates. Reading a 4 GB PS2 image from an SD card takes about a minute, so raising this makes first runs much slower. |
 
+## EmuMovies
+
+| Setting | Default | What it does |
+|---|---|---|
+| Download from EmuMovies (supporters) | off | Makes EmuMovies the first source for every media type. Needs a supporter membership. |
+| EmuMovies FTP server, backup server, user name and password | not set | Shown under **FTP Login** on emumovies.com. They may differ from your website login. The backup server is tried when the main one can't be reached or refuses the login. All four are kept in `settings.local.json`. |
+| Video quality | HQ | HD (1080p) looks best but takes several times the space; SQ (240p) is smallest. |
+| Download videos, manuals | on | Which kinds of EmuMovies media to download per game. |
+| Use EmuMovies artwork packs | on | Fill images from the packs fetched with **Download EmuMovies artwork**. |
+| EmuMovies artwork folder | blank | Where unpacked packs are kept. Blank means an `emumovies-artwork` folder next to ES-DE's media folder. Several GB per system. |
+
 ## Artwork
 
 | Setting | Default | What it does |

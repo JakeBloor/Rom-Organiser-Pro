@@ -57,6 +57,26 @@ FIELDS = (
           "Bigger files, and compressed images such as .chd and .rvz, are only fingerprinted: "
           "quick to check for duplicates, but not matched to a DAT name. Reading a 4 GB "
           "PS2 image from an SD card takes about a minute.", minimum=1, maximum=1_000_000),
+    Field("enable_emumovies", "Download from EmuMovies (supporters)", "bool", False, "EmuMovies",
+          "The first source for videos and manuals. Needs a supporter membership. Read-only: "
+          "nothing on EmuMovies' server is ever changed."),
+    Field("emumovies_host_main", "EmuMovies FTP server", "text", "", "EmuMovies",
+          "Shown under FTP Login on emumovies.com once you're signed in.", local=True),
+    Field("emumovies_host_backup", "EmuMovies backup FTP server", "text", "", "EmuMovies",
+          "Tried when the main server can't be reached. Optional.", local=True),
+    Field("emumovies_user", "EmuMovies FTP user name", "text", "", "EmuMovies",
+          "From FTP Login on emumovies.com; may differ from your website login.", local=True),
+    Field("emumovies_password", "EmuMovies FTP password", "secret", "", "EmuMovies"),
+    Field("emumovies_video_quality", "Video quality", "choice", "HQ", "EmuMovies",
+          "HD videos look best but take several times the space of HQ.",
+          choices=(("HD", "HD (1080p, large)"), ("HQ", "HQ (480p)"), ("SQ", "SQ (240p, smallest)"))),
+    Field("emumovies_videos", "Download videos", "bool", True, "EmuMovies"),
+    Field("emumovies_manuals", "Download manuals", "bool", True, "EmuMovies"),
+    Field("emumovies_artwork", "Use EmuMovies artwork packs", "bool", True, "EmuMovies",
+          "Images from the packs fetched with Download EmuMovies artwork on the home page."),
+    Field("emumovies_artwork_dir", "EmuMovies artwork folder", "path", "", "EmuMovies",
+          "Where unpacked packs are kept. Leave blank for an emumovies-artwork folder next to "
+          "ES-DE's media folder. Several GB per system."),
     Field("enable_libretro_thumbnails", "Download libretro thumbnails", "bool", True, "Artwork",
           "Covers, screenshots and title screens. No account needed."),
     Field("enable_steamgriddb", "Download from SteamGridDB", "bool", True, "Artwork",

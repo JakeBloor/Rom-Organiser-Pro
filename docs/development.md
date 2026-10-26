@@ -15,6 +15,9 @@ modules/
   library.py           Lists games the way ES-DE does; finds new games still to organise
   cache.py             Checksums and last outcomes per file, trusted while size and mtime match
   media.py             ES-DE and Steam image paths, and media coverage counts
+  emumovies.py         EmuMovies file server (read-only): set matching, cached listings, videos and manuals
+  emumovies_packs.py   EmuMovies artwork packs: choosing, downloading, unpacking into a local library
+  unpack.py            .rar/.7z/.zip unpacking (split archives too) through libarchive
   artwork.py           libretro and SteamGridDB downloads
   scraper.py           Runs Skyscraper for game data and extra media
   srm.py               Fills in Steam ROM Manager's local image paths

@@ -119,6 +119,33 @@ def _miss_reason(path, hashes):
     return "not in the DATs: renamed, patched, a hack or homebrew"
 
 
+def game_logger(logger, system, game, *roots):
+    """
+    A logger naming the system and game in each line, e.g. "[MOVED] psx ·
+    Final Fantasy VII (USA) · ...", with paths shown relative to roots.
+    """
+    prefixes = sorted((f"{root}/" for root in roots if root), key=len, reverse=True)
+    label = f"{system or 'unknown system'} · {game}"
+
+    def log(message, level="INFO"):
+        for prefix in prefixes:
+            message = message.replace(prefix, "")
+        tag, separator, rest = message.partition("] ")
+        logger(f"{tag}] {label} · {rest}" if separator else f"{label} · {message}", level)
+
+    return log
+
+
+def _identified(log, matched_by, dat_title, hashes, reason):
+    """Logs how a game was identified, and from which DAT."""
+    if matched_by == "serial":
+        log(f"[IDENTIFIED] matched by serial {hashes['serial']} in {dat_title}")
+    elif matched_by:
+        log(f"[IDENTIFIED] matched by {matched_by} in {dat_title}")
+    else:
+        log(f"[IDENTIFIED] no DAT match: {reason}")
+
+
 def _priority_key(path, rom_root):
     """Sorts files so the priority systems' come first, in their order."""
     priority = settings.priority_systems()
@@ -174,10 +201,12 @@ def repair_playlists(rom_root, logger, dry_run=False):
         repaired += 1
         dead = len(entries) - len(working)
         if dry_run:
-            logger(f"[DRY RUN] {playlist}: would drop {dead} entries that lead nowhere")
+            log = game_logger(logger, playlist.parent.name, playlist.stem, rom_root)
+            log(f"[DRY RUN] would drop {dead} entries that lead nowhere")
         else:
             write_m3u(playlist, working)
-            logger(f"[PLAYLIST] {playlist}: dropped {dead} entries that led nowhere")
+            log = game_logger(logger, playlist.parent.name, playlist.stem, rom_root)
+            log(f"[PLAYLIST] dropped {dead} entries that led nowhere")
 
     return repaired
 
@@ -376,7 +405,7 @@ def process_roms(
         status["updated_at"] = time.time()
 
         if file.is_dir() and is_ps3_folder(file):
-            _place_ps3_folder(file, rom_root, logger, status, dry_run, planned, cache, placed, emptied)
+            _place_ps3_folder(file, rom_root, logger, status, dry_run, planned, cache, placed, emptied, input_folder)
             continue
 
         # Track files move together with their .cue/.gdi sheet
@@ -395,7 +424,8 @@ def process_roms(
             in_library = None
         if identity in seen_hashes or in_library:
             already = f": already in your library as {in_library}" if in_library else ""
-            logger(f"[DUPLICATE] {file}{already}")
+            log = game_logger(logger, _system_folder(file, rom_root), file.stem, rom_root, input_folder)
+            log(f"[DUPLICATE] {file}{already}")
             _bump(status, "duplicates")
             _remember(cache, file, outcome="duplicate")
             continue
@@ -425,9 +455,10 @@ def process_roms(
             matched_by = "name" if dat_name else None
 
         system = chosen or dat_system or detect_system(file, allow_guess=False)
+        log = game_logger(logger, system, dat_name or file.stem, rom_root, input_folder)
 
         if not system:
-            logger(
+            log(
                 f"[UNSORTED] {file}: couldn't tell which system this is for. "
                 "Put it in a folder named after the system (e.g. ps2/) and run again."
             )
@@ -446,6 +477,7 @@ def process_roms(
             misses = status.setdefault("dat_misses", {})
             reason = _miss_reason(hashed, hashes)
             misses[reason] = misses.get(reason, 0) + 1
+        _identified(log, matched_by, dat_title, hashes, None if matched_by else reason)
 
         unit = [file] + tracks
         disc = get_disc_number(file.stem) or (dat_name and get_disc_number(dat_name))
@@ -462,7 +494,7 @@ def process_roms(
 
         if disc and system not in ARCADE_SYSTEMS:
             title = _playlist_title(dat_name or file.stem)
-            discs_by_game[(system, title)].append((disc, unit, game))
+            discs_by_game[(system, title)].append((disc, unit, game, log))
             continue
 
         playlist = None
@@ -476,7 +508,7 @@ def process_roms(
         elif tracks and system not in ARCADE_SYSTEMS:
             # Steam can't launch a playlist for this system: hide the tracks instead
             if _place_sheet_hiding_tracks(
-                file, tracks, rom_root, system, logger, status, dry_run, planned, cache, emptied
+                file, tracks, rom_root, system, log, status, dry_run, planned, cache, emptied
             ):
                 placed.append({**game, "path": rom_root / system / file.name})
                 _organised(cache, rom_root / system / file.name, game, dry_run, emptied, file)
@@ -485,10 +517,10 @@ def process_roms(
             dest_dir = rom_root / system
             launch_path = dest_dir / file.name
 
-        if _place(unit, dest_dir, logger, status, dry_run, planned, playlist, cache):
+        if _place(unit, dest_dir, log, status, dry_run, planned, playlist, cache):
             if playlist:
                 entry = Path(os.path.relpath(dest_dir / file.name, playlist.parent)).as_posix()
-                _write_playlist(playlist.parent, file.stem, [entry], logger, dry_run)
+                _write_playlist(playlist.parent, file.stem, [entry], log, dry_run)
             placed.append({**game, "path": launch_path})
             _organised(cache, dest_dir / file.name, game, dry_run, emptied, file)
 
@@ -503,21 +535,21 @@ def process_roms(
             dest_dir = playlist_dir = launch_path = rom_root / system / f"{title}.m3u"
         else:
             # The system's Steam parser can't launch playlists: one entry per disc
-            for _, unit, game in discs:
+            for _, unit, game, log in discs:
                 if len(unit) > 1:
                     placed_disc = _place_sheet_hiding_tracks(
-                        unit[0], unit[1:], rom_root, system, logger, status, dry_run, planned, cache, emptied
+                        unit[0], unit[1:], rom_root, system, log, status, dry_run, planned, cache, emptied
                     )
                 else:
-                    placed_disc = _place(unit, rom_root / system, logger, status, dry_run, planned, cache=cache)
+                    placed_disc = _place(unit, rom_root / system, log, status, dry_run, planned, cache=cache)
                 if placed_disc:
                     placed.append({**game, "path": rom_root / system / unit[0].name})
                     _organised(cache, rom_root / system / unit[0].name, game, dry_run, emptied, unit[0])
             continue
 
         playlist_entries = []
-        for _, unit, game in discs:
-            if _place(unit, dest_dir, logger, status, dry_run, planned, cache=cache):
+        for _, unit, game, log in discs:
+            if _place(unit, dest_dir, log, status, dry_run, planned, cache=cache):
                 playlist_entries.append(
                     Path(os.path.relpath(dest_dir / unit[0].name, playlist_dir)).as_posix()
                 )
@@ -526,7 +558,9 @@ def process_roms(
         if not playlist_entries:
             continue
 
-        _write_playlist(playlist_dir, title, playlist_entries, logger, dry_run)
+        _write_playlist(
+            playlist_dir, title, playlist_entries, game_logger(logger, system, title, rom_root, input_folder), dry_run
+        )
 
         first = discs[0][2]
         placed.append(
@@ -555,7 +589,7 @@ def _size(count, scale):
     return f"{count / 1024 ** 2:.0f} MB"
 
 
-def _place_ps3_folder(folder, rom_root, logger, status, dry_run, planned, cache, placed, emptied):
+def _place_ps3_folder(folder, rom_root, logger, status, dry_run, planned, cache, placed, emptied, input_folder):
     """
     A PS3 game is a folder of thousands of files: it's placed whole in ps3/,
     never hashed, and named from its PARAM.SFO, since the folder is often
@@ -570,7 +604,9 @@ def _place_ps3_folder(folder, rom_root, logger, status, dry_run, planned, cache,
             "identity": f"folder:{folder.name}"}
     dest_dir = rom_root / "ps3"
 
-    if _place([folder], dest_dir, logger, status, dry_run, planned, cache=cache):
+    log = game_logger(logger, "ps3", dat_name or title, rom_root, input_folder)
+    log(f"[IDENTIFIED] matched by serial {serial} in {dat_title}" if dat_name else "[IDENTIFIED] no DAT match: PS3 game folder")
+    if _place([folder], dest_dir, log, status, dry_run, planned, cache=cache):
         placed.append({**game, "path": dest_dir / folder.name})
         _organised(cache, dest_dir / folder.name, game, dry_run, emptied, folder)
 

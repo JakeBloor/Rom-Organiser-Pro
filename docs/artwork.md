@@ -1,6 +1,13 @@
 # Game data and artwork
 
-After a real organise run, the app gets images for each new game from up to three sources. It only downloads the image types a game doesn't have yet, so running again never replaces images you already have.
+After a real organise run, the app gets media for each new game from up to four sources, in this order:
+
+1. **EmuMovies**, for supporters: every media type, videos and manuals included.
+2. **Skyscraper**, with ScreenScraper: game data, plus any media EmuMovies didn't have.
+3. **libretro** thumbnails.
+4. **SteamGridDB**: Steam artwork, and anything still missing.
+
+It only downloads the media types a game doesn't have yet. So the first source with a type wins, and running again never replaces media you already have.
 
 ## What goes where
 
@@ -41,6 +48,36 @@ steam-artwork/psx/tall/Final Fantasy VII (USA).png
 ```
 
 ## Sources
+
+### EmuMovies
+
+[EmuMovies](https://emumovies.com) is the first source asked, for supporters. It provides:
+
+- **Videos and manuals,** downloaded per game from EmuMovies' file server during each organise run.
+- **Artwork,** which EmuMovies only offers as whole-system packs. Click **Download EmuMovies artwork** on the home page to fetch them once into a local library. Organise runs then copy each game's images from it.
+
+The connection to EmuMovies is read-only. It can list folders and download files, and every other FTP command is refused before it reaches the server. Nothing on EmuMovies is ever changed or deleted. Audio isn't downloaded, since neither ES-DE nor Steam uses it.
+
+**Setting up.** Sign in at emumovies.com and open **FTP Login**, which shows your FTP server (and a backup server), user name and password. Enter them in the **EmuMovies** section of Settings and turn on **Download from EmuMovies**. You can also choose the video quality (HD 1080p, HQ 480p or SQ 240p), and whether to download videos and manuals.
+
+**Videos and manuals.** Games are matched by their DAT name, then their file name, then their title without tags, preferring your region. If a video isn't available in your chosen quality, the next quality is used. Folder listings are kept for a day in `cache/emumovies.json`, and downloads use one connection at a time.
+
+**Artwork packs.** For each system in your ROM folder, the newest official pack of each art type is chosen. Where EmuMovies has no official pack for a type, the best community pack is used instead.
+
+| Pack | ES-DE folder |
+|---|---|
+| Boxes-2D | covers |
+| Boxes-3D | 3dboxes |
+| Boxes-Back | backcovers |
+| Gameplay snaps | screenshots |
+| Title snaps | titlescreens |
+| Logos | marquees |
+| Game media, carts, discs | physicalmedia |
+| Backgrounds | fanart |
+
+Each pack is downloaded and unpacked into `<library>/<system>/<type>/`, then the downloaded archive is deleted. The library is the `emumovies-artwork` folder next to ES-DE's media folder unless you set another in Settings. `manifest.json` there records each pack's version, so a pack is only downloaded again when EmuMovies publishes a newer one. Images go into ES-DE's media folders as hard links when the library is on the same drive, so they take no extra space; otherwise they're copied.
+
+Packs are large: about 1 to 10 GB per system for all eight types, around 37 GB for twelve popular systems. Archives are unpacked with libarchive, which is built into SteamOS and macOS, including `.rar` and `.7z` packs split into parts.
 
 ### libretro thumbnails
 

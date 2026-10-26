@@ -29,7 +29,7 @@ Feature: Settings saved in settings.json and settings.local.json, edited on the 
       | screenscraper_password | hunter2    |
       | scraper_region         | eu         |
     Then settings.json should hold "scraper_region" but not "steamgriddb_api, screenscraper_user, screenscraper_password"
-    And settings.local.json should hold only "screenscraper_password, screenscraper_user, steamgriddb_api"
+    And settings.local.json should hold only "emumovies_host_backup, emumovies_host_main, emumovies_password, emumovies_user, screenscraper_password, screenscraper_user, steamgriddb_api"
 
   Scenario Outline: Invalid settings are refused and nothing is saved
     When the settings are saved with

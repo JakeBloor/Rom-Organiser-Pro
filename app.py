@@ -10,6 +10,7 @@ from datetime import datetime
 
 from modules import esde, settings
 from modules.artwork import fetch_artwork
+from modules import emumovies, emumovies_packs
 from modules.cache import LEFT_IN_PLACE, FileCache
 from modules.library import list_library, pending_games, system_folders
 from modules.media import media_coverage, steam_artwork_root
@@ -34,6 +35,7 @@ STATUS_COUNTERS = (
     "serial_matches",
     "name_matches",
     "artwork_downloads",
+    "emumovies_downloads",
     "unsorted",
     "skipped",
 )
@@ -182,6 +184,14 @@ def api_status():
                 "to_organise": new_roms_summary()["total"],
             },
             "apis": {
+                "emumovies": {
+                    "enabled": settings.get("enable_emumovies"),
+                    "configured": bool(
+                        (settings.get("emumovies_host_main") or settings.get("emumovies_host_backup"))
+                        and settings.get("emumovies_user")
+                        and settings.get("emumovies_password")
+                    ),
+                },
                 "steamgriddb": {
                     "enabled": settings.get("enable_steamgriddb"),
                     "configured": bool(settings.get("steamgriddb_api")),
@@ -327,6 +337,45 @@ def _scrape(systems, rom_root):
             return
 
 
+def _artwork_library():
+    """The unpacked EmuMovies artwork packs, if they're switched on and have been downloaded."""
+    if not (settings.get("enable_emumovies") and settings.get("emumovies_artwork")):
+        return None
+    root = emumovies_packs.library_root()
+    return emumovies_packs.ArtworkLibrary(root) if root.is_dir() else None
+
+
+def _download_emumovies(games):
+    """
+    EmuMovies first: images from the unpacked artwork packs, then videos
+    and manuals, one game at a time over a single connection.
+    """
+    library = _artwork_library()
+    server = emumovies.connect(app_logger.log)
+    if server is None and library is None:
+        return
+
+    media_root = esde.media_root()
+    try:
+        for index, game in enumerate(games):
+            if _stopping():
+                return
+            _progress(
+                progress=int(index * 100 / len(games)),
+                current_file=Path(game["path"]).name,
+                current_detail=f"{index + 1} of {len(games)} games",
+            )
+            saved = emumovies.fetch_emumovies(game, media_root, server, app_logger.log, library)
+            if saved:
+                status["emumovies_downloads"] += 1
+            for media_type in saved:
+                downloads = status["media_downloads"]
+                downloads[media_type] = downloads.get(media_type, 0) + 1
+    finally:
+        if server:
+            server.close()
+
+
 def _download_artwork(games):
     """Downloads artwork for several games at once, counting what each saved."""
     media_root = esde.media_root()
@@ -398,8 +447,13 @@ def run_organise(input_path, rom_root, dry_run, force=False):
             order = sort_by_priority({game["system"] for game in placed})
             placed.sort(key=lambda game: order.index(game["system"]))
 
-            _progress(phase="scraping", progress=0)
-            _scrape(order, rom_root)
+            # EmuMovies first; Skyscraper, libretro and SteamGridDB fill what's left
+            _progress(phase="emumovies", progress=0)
+            _download_emumovies(placed)
+
+            if not _stopping():
+                _progress(phase="scraping", progress=0, current_file="", current_detail="")
+                _scrape(order, rom_root)
 
             if not _stopping():
                 _progress(phase="artwork", progress=0, current_file="", current_detail="")
@@ -485,6 +539,84 @@ def start_organise():
     ).start()
 
     return jsonify({"started": True}), 202
+
+
+def run_artwork_packs(rom_root):
+    """Downloads and unpacks EmuMovies artwork packs for the ROM folder's systems. Runs in a worker thread."""
+    server = None
+    try:
+        _progress(phase="packs", current_detail="connecting to EmuMovies")
+        server = emumovies.connect(app_logger.log)
+        if server is None:
+            app_logger.error("EmuMovies artwork needs EmuMovies switched on and set up in Settings")
+            _progress(phase="failed")
+            return
+
+        library = emumovies_packs.ArtworkLibrary(emumovies_packs.library_root())
+        summary = emumovies_packs.download_packs(
+            server,
+            rom_root,
+            library,
+            app_logger.log,
+            progress=lambda detail: _progress(current_detail=detail),
+            should_stop=_stopping,
+        )
+        app_logger.success(
+            f"EmuMovies artwork: {summary['installed']} packs unpacked, "
+            f"{summary['up_to_date']} already up to date, {summary['failed']} failed"
+        )
+        _progress(phase="stopped" if _stopping() else "done", progress=100)
+    except Exception as e:
+        _progress(phase="failed")
+        app_logger.error(f"EmuMovies artwork failed: {e}")
+    finally:
+        if server:
+            server.close()
+        status["running"] = False
+        status["current_file"] = ""
+        status["current_detail"] = ""
+        organise_lock.release()
+
+
+def _start_job(target, rom_root, **fields):
+    """Takes the run lock and starts target in a worker thread, or says why it can't."""
+    if not Path(rom_root).is_dir():
+        return jsonify({"error": f"ROM folder not found: {rom_root}"}), 400
+    if not organise_lock.acquire(blocking=False):
+        return jsonify({"error": "An organise run is already in progress"}), 409
+
+    app_logger.clear()
+    status.update(
+        running=True,
+        phase="starting",
+        progress=0,
+        files_total=0,
+        files_checked=0,
+        current_file="",
+        current_detail="",
+        started_at=time.time(),
+        updated_at=time.time(),
+        cancel_requested=False,
+        media_downloads={},
+        unsorted_files=[],
+        dat_misses={},
+        report=None,
+        **{counter: 0 for counter in STATUS_COUNTERS},
+        **fields,
+    )
+    threading.Thread(target=target, args=(rom_root,), daemon=True).start()
+    return jsonify({"started": True}), 202
+
+
+@app.route("/api/emumovies/artwork", methods=["POST"])
+def start_artwork_packs():
+    """Download and unpack EmuMovies artwork packs for every system in the ROM folder"""
+    body = request.get_json(silent=True) or {}
+    rom_root = str(body.get("rom_root", "")).strip() or str(esde.rom_root())
+    response = _start_job(run_artwork_packs, rom_root, dry_run=False)
+    if response[1] == 202:
+        app_logger.info(f"Downloading EmuMovies artwork packs for the systems in {rom_root}")
+    return response
 
 
 @app.route("/api/stop", methods=["POST"])

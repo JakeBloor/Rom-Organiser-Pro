@@ -87,7 +87,7 @@ def _fetch_libretro(game, media_root, logger):
             try:
                 response = _get(url)
             except requests.RequestException as e:
-                logger(f"[ARTWORK ERROR] libretro thumbnails: {e}", "WARNING")
+                logger(f"[ARTWORK ERROR] {game['system']} · {game['names'][0]} · libretro thumbnails: {e}", "WARNING")
                 return saved
 
             if response.status_code == 200:
@@ -99,7 +99,7 @@ def _fetch_libretro(game, media_root, logger):
                 break
 
     if saved:
-        logger(f"[ARTWORK] libretro {', '.join(saved)} for {game['names'][0]}")
+        logger(f"[ARTWORK] {game['system']} · {game['names'][0]} · libretro {', '.join(saved)}")
     return saved
 
 
@@ -136,7 +136,7 @@ def _fetch_steamgriddb(game, media_root, steam_root, logger):
         results = search.json().get("data") or []
 
         if not results:
-            logger(f"[ARTWORK] No results for {search_name}")
+            logger(f"[ARTWORK] {system} · {search_name} · No results for {search_name} on SteamGridDB")
             return []
 
         game_id = results[0]["id"]
@@ -169,13 +169,13 @@ def _fetch_steamgriddb(game, media_root, steam_root, logger):
                     saved.append(media_type)
 
     except (requests.RequestException, ValueError, KeyError) as e:
-        logger(f"[ARTWORK ERROR] {search_name}: {e}", "WARNING")
+        logger(f"[ARTWORK ERROR] {system} · {search_name} · SteamGridDB: {e}", "WARNING")
         return saved
 
     if saved:
-        logger(f"[ARTWORK] SteamGridDB {', '.join(saved)} for {search_name}")
+        logger(f"[ARTWORK] {system} · {search_name} · SteamGridDB {', '.join(saved)}")
     else:
-        logger(f"[ARTWORK] No SteamGridDB images found for {search_name}")
+        logger(f"[ARTWORK] {system} · {search_name} · No SteamGridDB images found for {search_name}")
     return saved
 
 

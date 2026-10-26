@@ -29,7 +29,7 @@ Feature: Downloading images for ES-DE and Steam
     And SteamGridDB has every kind of image for its game
     When artwork is fetched for "snes/Chrono Trigger (USA).sfc" named "Chrono Trigger (USA)" from the DAT "Nintendo - Super Nintendo Entertainment System"
     Then the ES-DE "covers" image should come from SteamGridDB "grids"
-    And the artwork log should mention "[ARTWORK ERROR] libretro thumbnails"
+    And the artwork log should mention "[ARTWORK ERROR] snes · Chrono Trigger (USA) · libretro thumbnails"
 
   Scenario: Systems libretro doesn't cover go straight to SteamGridDB
     Given SteamGridDB has every kind of image for its game
@@ -56,7 +56,7 @@ Feature: Downloading images for ES-DE and Steam
       | has no API key             | Missing SteamGridDB API key                   |
       | finds no game              | No results for Chrono Trigger                 |
       | has no images for the game | No SteamGridDB images found for Chrono Trigger |
-      | can't be reached           | [ARTWORK ERROR] Chrono Trigger                |
+      | can't be reached           | [ARTWORK ERROR] snes · Chrono Trigger · SteamGridDB |
 
   Scenario: Nothing is downloaded when both sources are turned off
     Given libretro thumbnails are disabled

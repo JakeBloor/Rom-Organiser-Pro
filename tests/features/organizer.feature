@@ -445,3 +445,15 @@ Feature: ROM organiser
     When the playlists are repaired in dry-run mode
     Then the log should mention "would drop 1 entries"
     And the playlist "psx/Final Fantasy VII (USA).m3u" should still read "Final Fantasy VII (USA) (Disc 1).chd | ../.multifile/psx/Final Fantasy VII (USA)/Final Fantasy VII (USA) (Disc 1).chd"
+
+  Scenario: Each log line names the game and its system, with paths shown from the ROM folder
+    Given the DATs know "Spyro the Dragon (USA)" for "psx" in "Sony - PlayStation" by name
+    And "psx/Spyro the Dragon (USA).chd" is dropped into the ROM folder
+    And "New/Mystery Disc.iso" is dropped into the ROM folder
+    And "New/snes/Chrono Trigger (USA).sfc" is dropped into the ROM folder
+    When the ROM folder is organised
+    Then the log should include "[IDENTIFIED] psx · Spyro the Dragon (USA) · matched by name in Sony - PlayStation"
+    And the log should include "[IN PLACE] psx · Spyro the Dragon (USA) · psx/Spyro the Dragon (USA).chd"
+    And the log should include "[IDENTIFIED] snes · Chrono Trigger (USA) · no DAT match: not in the DATs: renamed, patched, a hack or homebrew"
+    And the log should include "[MOVED] snes · Chrono Trigger (USA) · New/snes/Chrono Trigger (USA).sfc -> snes/Chrono Trigger (USA).sfc"
+    And the log should include a line starting "[UNSORTED] unknown system · Mystery Disc · New/Mystery Disc.iso"

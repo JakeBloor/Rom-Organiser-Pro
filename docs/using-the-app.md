@@ -15,6 +15,7 @@ This shows what's already in your ROM folder:
   - **Steam artwork.** The share of games that have each of Steam's five image types.
 - **API connections:** whether SteamGridDB and ScreenScraper are set up.
 - **Use this app's artwork in Steam ROM Manager:** see [Steam ROM Manager](artwork.md#steam-rom-manager).
+- **Download EmuMovies artwork:** fetches EmuMovies' artwork packs for every system in the ROM folder, once. Progress shows under Progress, and Stop works as for a run. See [EmuMovies](artwork.md#emumovies).
 - **Last scanned:** when the library was last scanned, and whether it covered all systems or only some.
 
 Each chart shows exact numbers when you hover over or tab to a bar. **Show as table** lists the same numbers as a table.
@@ -60,12 +61,13 @@ The first time, every game already in your library is new, so the first run work
 
 Games the app has already examined and left in place aren't hashed again on the next run, unless the file has changed. See [Cache](#cache).
 
-A real run has four steps. The systems listed under **Systems to organise first** in Settings go first in each step (by default `psx, ps2, ps3, psp, gc, n64, xbox`).
+A real run has five steps. The systems listed under **Systems to organise first** in Settings go first in each step (by default `psx, ps2, ps3, psp, gc, n64, xbox`).
 
 1. **Finding new games** in the ROM folder.
 2. **Organising.** Each game is identified and moved, or organised where it is. See [How games are stored](how-games-are-stored.md).
-3. **Scraping.** If Skyscraper is installed, it downloads game data and extra media for each system that got new games. If it isn't installed, the app logs a warning and skips this step.
-4. **Artwork.** Images are downloaded from libretro and SteamGridDB, for four games at a time. See [Game data and artwork](artwork.md).
+3. **EmuMovies.** If it's set up, media is downloaded from EmuMovies first, one game at a time.
+4. **Scraping.** If Skyscraper is installed, it downloads game data and extra media for each system that got new games. If it isn't installed, the app logs a warning and skips this step.
+5. **Artwork.** Images are downloaded from libretro and SteamGridDB, for four games at a time. See [Game data and artwork](artwork.md).
 
 A dry run stops after step 2.
 
@@ -78,7 +80,7 @@ While a run is going you'll see:
 - how long the run has been going
 - a warning if nothing has moved for a minute. That usually means one very big file or a slow scrape, not a stuck run.
 - counters for organised games, DAT matches, duplicates, unsorted and skipped files, and images downloaded
-- the live log, which keeps the most recent 500 lines; `/logs` shows the full log
+- the live log, which keeps the most recent 500 lines; `/logs` shows the full log. Each line about a game names its system and game, for example `[MOVED] psx · Final Fantasy VII (USA) (Disc 1) · ...`, and an `[IDENTIFIED]` line says how the game was matched to a DAT.
 
 ### Stopping a run
 
