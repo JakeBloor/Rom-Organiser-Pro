@@ -4,6 +4,30 @@ Context for a Claude Code session running on the Steam Deck. The app was built a
 
 Read [docs/README.md](docs/README.md) for what the app does, and [docs/development.md](docs/development.md) for how the code fits together.
 
+## Starting a session on the Deck
+
+In Desktop Mode, open a terminal in the repo, run `git pull`, start Claude Code, and paste:
+
+```
+Read DECK_TESTING.md, then docs/README.md and docs/development.md, so you know
+this project and how it's built.
+
+We're testing ROM Organizer Pro on my Steam Deck for the first time. Set it up
+(venv, requirements, start the app), then work through the DECK_TESTING.md
+checklist with me, one section at a time.
+
+- Start with a dry run and don't move any files until I say so.
+- For each check, tell me what to look at and wait for my answer before moving on.
+- If something breaks, find the cause, fix it with a test (coverage must stay
+  at 100%), and tell me what you changed.
+- Never ask for, print or commit my account details: I'll enter them on the
+  Settings page myself.
+- Before downloading EmuMovies artwork packs, check free space and tell me how
+  much they'll need.
+- Keep a list of what passed, what failed and what you fixed, and don't commit
+  until I ask.
+```
+
 ## What the app is
 
 A Flask web app that organises retro game ROMs for EmuDeck on the Steam Deck, so each game shows exactly once in **ES-DE** and in **Steam**, through Steam ROM Manager, with artwork, videos and manuals.
